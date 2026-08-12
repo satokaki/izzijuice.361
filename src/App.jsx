@@ -33,7 +33,6 @@ import Materials from '@/pages/Materials';
 import Products from '@/pages/Products';
 import Warehouses from '@/pages/Warehouses';
 import Assistant from '@/pages/Assistant';
-import OperationalCost from '@/pages/OperationalCost';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import ForgotPassword from '@/pages/ForgotPassword';
@@ -80,7 +79,6 @@ const AuthenticatedApp = () => {
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/payments" element={<Payments />} />
           <Route path="/stock-card" element={<StockCard />} />
-          <Route path="/operational-cost" element={<OperationalCost />} />
           <Route path="/reports/sales" element={<SalesReport />} />
           <Route path="/reports/receivables" element={<ReceivablesReport />} />
           <Route path="/reports/inventory" element={<InventoryReport />} />

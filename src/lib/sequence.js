@@ -38,7 +38,6 @@ export const generatePayableNumber = () => gen('payable');
 export const generateInvoiceNumber = () => gen('invoice');
 export const generatePaymentNumber = () => gen('payment');
 export const generateAdjustmentNumber = () => gen('adjustment');
-export const generateOperationalCostCode = () => gen('operational_cost');
 
 /**
  * Legacy generic order-number generator kept for backward compatibility.
