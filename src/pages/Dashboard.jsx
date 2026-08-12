@@ -619,11 +619,11 @@ export default function Dashboard() {
 
       <div className="mb-5">
         <h1 className="font-heading text-xl font-bold tracking-tight">
-          Dashboard — LAB PRO v3.6 DEV
+          Dashboard — LAB PRO v3.6.1 DEV
         </h1>
 
         <p className="text-[13px] text-muted-foreground mt-0.5">
-          LAB PRO · DEV / BETA TEST · MIGRATION READY
+          LAB PRO · DEV / BETA TEST · OPERATIONAL COST TEST
         </p>
       </div>
 
@@ -987,446 +987,180 @@ export default function Dashboard() {
               </div>
             )}
 
+            {/* DEV 3.6.1 INFO */}
             <div className="bg-white border border-border rounded-lg p-4">
 
               <h2 className="text-[13px] font-bold mb-3 flex items-center gap-1.5">
                 <Users className="w-4 h-4" />
-                Quick Info
+                DEV 3.6.1 Info
               </h2>
 
-              <div className="space-y-2 text-[12px] text-muted-foreground">
+              <div className="space-y-3 text-[12px] text-muted-foreground">
 
-                <p>
-                  <span className="font-medium text-foreground">
-                    Sistem:
-                  </span>
-                  {' '}LAB PRO v3.5 FINAL · LIVE
-                </p>
-
-                <p>
-                  <span className="font-medium text-foreground">
-                    Mode:
-                  </span>
-                  {' '}Industrial Operations
-                </p>
-
-                {/* ==================================================
-                    HISTORY — CHANGE LOG v3.5
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Change Log v3.5
+                <div>
+                  <p>
+                    <span className="font-medium text-foreground">
+                      Sistem:
+                    </span>
+                    {' '}LAB PRO v3.6.1 DEV
                   </p>
 
-                  <ul className="space-y-1">
-                    <li>✓ Backup & Restore verified</li>
-                    <li>✓ Stock Premix / NIC / Sweetener fixed</li>
-                    <li>✓ Kartu Stok & chronology fixed</li>
-                    <li>✓ Timestamp transaksi WIB</li>
-                    <li>✓ Recipe density consistency</li>
-                    <li>✓ HPP & inventory costing improved</li>
-                    <li>✓ Excise search / box picker fixed</li>
-                    <li>✓ AI Assistant security hardened</li>
-                  </ul>
-
+                  <p className="mt-1">
+                    <span className="font-medium text-foreground">
+                      Status:
+                    </span>
+                    {' '}Development / Beta Test
+                  </p>
                 </div>
 
-                {/* ==================================================
-                    HISTORY — DASHBOARD USER
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
+                {/* OPERATIONAL COST */}
+                <div className="pt-3 border-t border-border">
+
+                  <p className="font-semibold text-foreground mb-2">
+                    Update DEV 3.6.1
+                  </p>
+
+                  <ul className="space-y-2">
+
+                    <li className="flex gap-2">
+                      <span className="text-emerald-600 font-bold">
+                        ✓
+                      </span>
+
+                      <div>
+                        <span className="font-medium text-foreground">
+                          Menu Operational Cost
+                        </span>
+
+                        <p className="mt-0.5">
+                          Menu baru untuk pencatatan biaya operasional
+                          dan loss / kerugian perusahaan.
+                        </p>
+                      </div>
+                    </li>
+
+                    <li className="flex gap-2">
+                      <span className="text-emerald-600 font-bold">
+                        ✓
+                      </span>
+
+                      <div>
+                        <span className="font-medium text-foreground">
+                          Operational Cost UI
+                        </span>
+
+                        <p className="mt-0.5">
+                          Route dan halaman Operational Cost telah
+                          ditambahkan untuk pengujian DEV.
+                        </p>
+                      </div>
+                    </li>
+
+                    <li className="flex gap-2">
+                      <span className="text-amber-600 font-bold">
+                        !
+                      </span>
+
+                      <div>
+                        <span className="font-medium text-foreground">
+                          Phase 1 — UI Only
+                        </span>
+
+                        <p className="mt-0.5">
+                          Operational Cost belum terhubung ke entity
+                          Base44, Stock Adjustment, HPP, maupun
+                          Laporan Laba Rugi.
+                        </p>
+                      </div>
+                    </li>
+
+                  </ul>
+                </div>
+
+                {/* FULL RESTORE STATUS */}
+                <div className="pt-3 border-t border-border">
+
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+
+                    <div className="flex items-start gap-2">
+
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+
+                      <div>
+                        <p className="font-semibold text-amber-900">
+                          Full Restore Test — Perlu Verifikasi
+                        </p>
+
+                        <p className="mt-1 text-amber-800">
+                          Pengujian restore Full Backup DEV 3.6 ke
+                          DEV 3.6.1 mengalami HTTP 504 sebelum proses
+                          memberikan hasil akhir.
+                        </p>
+                      </div>
+
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t border-amber-200 space-y-1.5 text-amber-800">
+
+                      <p>
+                        • Sebagian data terindikasi berhasil masuk.
+                      </p>
+
+                      <p>
+                        • Kelengkapan seluruh record belum terverifikasi.
+                      </p>
+
+                      <p>
+                        • Belum dapat dipastikan entity atau record
+                        mana yang tertinggal.
+                      </p>
+
+                      <p className="font-medium text-amber-900">
+                        • Hindari Full Restore ulang sebelum data
+                        hasil restore diverifikasi untuk mencegah
+                        potensi duplikasi.
+                      </p>
+
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* VERIFICATION */}
+                <div className="pt-3 border-t border-border">
 
                   <p className="font-medium text-foreground mb-1">
-                    Update Dashboard User — 12 Agustus 2026
+                    Fokus Verifikasi Restore
                   </p>
 
                   <ul className="space-y-1 list-disc pl-4">
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Dashboard Permission Granular — FIXED & VERIFIED
-                      </span>
-                      {' '}· setiap user hanya melihat section Dashboard yang diizinkan.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Data Sensitif Terisolasi
-                      </span>
-                      {' '}· Nilai Persediaan, Penjualan, Piutang, dan Aktivitas tidak tampil bila permission OFF.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Conditional Fetch
-                      </span>
-                      {' '}· data Dashboard sensitif tidak di-fetch saat section permission tidak aktif.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Permission Persistence
-                      </span>
-                      {' '}· toggle hak akses tetap sesuai data tersimpan setelah dibuka kembali.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Admin Fail-Safe
-                      </span>
-                      {' '}· Administrator tetap mempunyai full Dashboard.
-                    </li>
-
+                    <li>Jumlah record backup vs DEV 3.6.1</li>
+                    <li>Master data</li>
+                    <li>Resep</li>
+                    <li>Transaksi pembelian & penjualan</li>
+                    <li>Production / Bottling / Labeling / Cukai</li>
+                    <li>StockLedger & StockBalance</li>
+                    <li>Piutang dan pembayaran</li>
                   </ul>
 
                 </div>
 
-                {/* ==================================================
-                    HISTORY — DASHBOARD PATCH LOCATION
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Patch Location — Dashboard User
-                  </p>
-
-                  <ul className="space-y-1 list-disc pl-4">
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/lib/permissions.js
-                      </span>
-                      {' '}· permission catalog + granular Dashboard keys.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/Settings.jsx
-                      </span>
-                      {' '}· UI toggle, read-back permission, dan persistence hak akses.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/Dashboard.jsx
-                      </span>
-                      {' '}· conditional render/fetch dan enforcement Dashboard per user.
-                    </li>
-
-                  </ul>
-
-                </div>
-
-                {/* ==================================================
-                    NEW HISTORY — LIVE PATCH 12 AUG 2026
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Update LIVE v3.5 — 12 Agustus 2026
-                  </p>
-
-                  <ul className="space-y-1 list-disc pl-4">
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Opening Balance / Stok Awal — LIVE
-                      </span>
-                      {' '}· Admin dapat memasukkan stok existing langsung ke stage inventory dengan qty, gudang, batch legacy, dan HPP/unit manual.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Duplicate Opening Balance Protection
-                      </span>
-                      {' '}· mencegah Saldo Awal dobel untuk kombinasi stok yang sudah tercatat.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Opening Balance → Labeling Compatibility — VERIFIED
-                      </span>
-                      {' '}· stok legacy READY_FOR_LABELING dapat diproses tanpa membuat Production/Bulk/Bottling palsu.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Legacy HPP Continuity — VERIFIED
-                      </span>
-                      {' '}· frozen HPP Opening Balance diteruskan ke Labeling → Cukai → READY_FOR_SALE.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Legacy Bottled Stock End-to-End — PASS
-                      </span>
-                      {' '}· Opening Balance READY_FOR_LABELING → Labeling → UNEXCISED → Excise → READY_FOR_SALE berhasil.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Purchase Double Posting Protection — LIVE
-                      </span>
-                      {' '}· guard mencegah transaksi pembelian yang sama diposting berulang.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Duplicate Stock / Payable Protection
-                      </span>
-                      {' '}· proteksi terhadap duplicate StockLedger dan SupplierPayable akibat posting berulang.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Purchase Submit Lock
-                      </span>
-                      {' '}· tombol Posting dinonaktifkan selama request berjalan untuk mencegah double-click.
-                    </li>
-
-                  </ul>
-
-                </div>
-
-                {/* ==================================================
-                    NEW HISTORY — PATCH LOCATION
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Patch Location — Update LIVE v3.5
-                  </p>
-
-                  <ul className="space-y-1 list-disc pl-4">
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/StockCard.jsx
-                      </span>
-                      {' '}· Opening Balance / Stok Awal + duplicate protection.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/Labeling.jsx
-                      </span>
-                      {' '}· Opening Balance READY_FOR_LABELING compatibility + HPP continuity.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/lib/purchaseUtils.js
-                      </span>
-                      {' '}· purchase posting guard + duplicate transaction protection.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/Purchases.jsx
-                      </span>
-                      {' '}· posting lock / double-click protection.
-                    </li>
-
-                  </ul>
-
-                </div>
-
-                {/* ==================================================
-                    HISTORY — PRODUCTION PDF SECURITY
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Production PDF Security — 12 Agustus 2026
-                  </p>
-
-                  <ul className="space-y-1 list-disc pl-4">
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Production PDF Security Hole — PATCHED
-                      </span>
-                      {' '}· hak melihat Produksi dipisahkan dari hak Download Work Order / PDF.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Granular Download Permission
-                      </span>
-                      {' '}· user dengan production.view tetap dapat melihat Produksi, tetapi PDF hanya tersedia jika production.download diizinkan.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        PDF Button Permission Enforcement
-                      </span>
-                      {' '}· tombol download tidak ditampilkan kepada user tanpa hak production.download.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Export Function Guard
-                      </span>
-                      {' '}· exportProductionPDF juga melakukan pemeriksaan permission sehingga akses tidak hanya diamankan dari UI.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Admin Full Access
-                      </span>
-                      {' '}· Administrator tetap memiliki akses penuh terhadap laporan Produksi.
-                    </li>
-
-                  </ul>
-
-                </div>
-
-                {/* ==================================================
-                    PATCH LOCATION — PRODUCTION PDF SECURITY
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Patch Location — Production PDF Security
-                  </p>
-
-                  <ul className="space-y-1 list-disc pl-4">
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/lib/permissions.js
-                      </span>
-                      {' '}· production.download permission.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/Settings.jsx
-                      </span>
-                      {' '}· granular Download permission control.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/components/PdfButton.jsx
-                      </span>
-                      {' '}· support permission action granular / action="download".
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/Production.jsx
-                      </span>
-                      {' '}· production.download enforcement + exportProductionPDF guard.
-                    </li>
-
-                  </ul>
-
-                  <p className="mt-2 text-emerald-700 font-medium">
-                    ✓ SECURITY PATCH · NON-DATA-AFFECTING
-                  </p>
-
-                </div>
-
-                {/* ==================================================
-                    HISTORY — DASHBOARD OPERATIONAL KPI
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Dashboard Operational KPI — 12 Agustus 2026
-                  </p>
-
-                  <ul className="space-y-1 list-disc pl-4">
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Dashboard Stage KPI Source — FIXED
-                      </span>
-                      {' '}· Siap Bottling, Siap Labeling, Belum Cukai, dan Siap Jual sekarang membaca posisi stok aktual dari StockBalance.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Siap Labeling Counter — FIXED
-                      </span>
-                      {' '}· output Bottling READY_FOR_LABELING sekarang langsung terbaca pada Dashboard.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Historical Status Dependency Removed
-                      </span>
-                      {' '}· KPI stage tidak lagi bergantung pada status historis ProductionOrder / LabelingOrder.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Ready For Sale Counter — FIXED
-                      </span>
-                      {' '}· Siap Jual tidak lagi menghitung jumlah master Product, tetapi posisi StockBalance READY_FOR_SALE yang masih memiliki stok.
-                    </li>
-
-                    <li>
-                      <span className="font-medium text-foreground">
-                        Positive Available Stock Only
-                      </span>
-                      {' '}· hanya balance dengan available_quantity / quantity lebih dari 0 yang dihitung sebagai posisi stage aktif.
-                    </li>
-
-                  </ul>
-
-                  <p className="mt-2 text-[11px] text-muted-foreground">
-                    Catatan: angka KPI stage menunjukkan jumlah posisi StockBalance / lot aktif, bukan total unit atau ml.
-                  </p>
-
-                </div>
-
-                {/* ==================================================
-                    PATCH LOCATION — DASHBOARD OPERATIONAL KPI
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-foreground mb-1">
-                    Patch Location — Dashboard Operational KPI
-                  </p>
-
-                  <ul className="space-y-1 list-disc pl-4">
-                    <li>
-                      <span className="font-medium text-foreground">
-                        src/pages/Dashboard.jsx
-                      </span>
-                      {' '}· StockBalance operational fetch + stage KPI source-of-truth correction.
-                    </li>
-                  </ul>
-
-                  <p className="mt-2 text-emerald-700 font-medium">
-                    ✓ BUG FIX · NON-DATA-AFFECTING
-                  </p>
-
-                </div>
-
-                {/* ==================================================
-                    MIGRATION STATUS
-                ================================================== */}
-                <div className="pt-2 border-t border-border">
-
-                  <p className="font-medium text-emerald-700 mb-1">
-                    Migration Readiness
-                  </p>
-
-                  <p className="text-emerald-700">
-                    ✓ Patch DATA-AFFECTING terbaru sudah diaplikasikan ke LIVE v3.5.
+                {/* SAFETY STATUS */}
+                <div className="pt-3 border-t border-border">
+
+                  <p className="text-emerald-700 font-medium">
+                    ✓ Operational Cost Phase 1 tidak mengubah data existing.
                   </p>
 
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    Baseline LIVE v3.5 siap menjadi source backup final sebelum restore ke DEV v3.6.
+                    DEV 3.6.1 digunakan untuk pengujian fitur baru
+                    dan validasi migrasi sebelum perubahan data
+                    diaktifkan.
                   </p>
 
                 </div>
 
-                <p className="pt-2 border-t border-border">
+                <p className="pt-3 border-t border-border">
                   Tanggal:{' '}
                   {new Date().toLocaleDateString(
                     'id-ID',
