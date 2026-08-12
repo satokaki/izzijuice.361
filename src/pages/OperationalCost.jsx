@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
+import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,9 @@ import {
   ReceiptText,
   AlertTriangle,
   X,
+  Loader2,
+  RefreshCw,
+  Database,
 } from "lucide-react";
 
 const COST_TYPES = [
@@ -58,7 +62,10 @@ const LOSS_CATEGORIES = [
   { value: "OTHER", label: "Lainnya" },
 ];
 
-const ALL_CATEGORIES = [...COST_CATEGORIES, ...LOSS_CATEGORIES];
+const ALL_CATEGORIES = [
+  ...COST_CATEGORIES,
+  ...LOSS_CATEGORIES,
+];
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("id-ID", {
@@ -69,7 +76,11 @@ function formatCurrency(value) {
 }
 
 function formatNumber(value) {
-  if (value === "" || value === null || value === undefined) {
+  if (
+    value === "" ||
+    value === null ||
+    value === undefined
+  ) {
     return "";
   }
 
@@ -94,8 +105,47 @@ function formatDisplayDate(value) {
   }).format(date);
 }
 
+function generateOperationalCostCode() {
+  const now = new Date();
+
+  const datePart = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
+
+  const timePart = [
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0"),
+  ].join("");
+
+  const randomPart = Math.floor(
+    100 + Math.random() * 900
+  );
+
+  return `OC-${datePart}-${timePart}-${randomPart}`;
+}
+
+function mapOperationalCost(row) {
+  return {
+    id: row.id,
+    code: row.code || "",
+    costDate: row.cost_date || "",
+    costType: row.cost_type || "COST",
+    category: row.category || "OTHER",
+    description: row.description || "",
+    amount: Number(row.amount || 0),
+    notes: row.notes || "",
+    status: row.status || "POSTED",
+    createdDate: row.created_date || null,
+  };
+}
+
 export default function OperationalCost() {
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date()
+    .toISOString()
+    .split("T")[0];
 
   const [form, setForm] = useState({
     costDate: today,
@@ -113,33 +163,84 @@ export default function OperationalCost() {
     type: "ALL",
   });
 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
   const availableCategories =
     form.costType === "LOSS"
       ? LOSS_CATEGORIES
       : COST_CATEGORIES;
 
+  useEffect(() => {
+    loadOperationalCosts();
+  }, []);
+
+  const loadOperationalCosts = async () => {
+    setLoading(true);
+    setLoadError("");
+
+    try {
+      const rows =
+        await base44.entities.OperationalCost.list(
+          "-cost_date",
+          1000
+        );
+
+      const mapped = (rows || [])
+        .map(mapOperationalCost)
+        .filter(
+          (item) =>
+            !item.status ||
+            item.status === "POSTED"
+        );
+
+      setItems(mapped);
+    } catch (error) {
+      console.error(
+        "OperationalCost load error:",
+        error
+      );
+
+      setLoadError(
+        "Data Cost & Loss gagal dimuat. Silakan coba refresh."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const totalCost = useMemo(() => {
     return items
-      .filter((item) => item.costType === "COST")
+      .filter(
+        (item) => item.costType === "COST"
+      )
       .reduce(
-        (total, item) => total + Number(item.amount || 0),
+        (total, item) =>
+          total + Number(item.amount || 0),
         0
       );
   }, [items]);
 
   const totalLoss = useMemo(() => {
     return items
-      .filter((item) => item.costType === "LOSS")
+      .filter(
+        (item) => item.costType === "LOSS"
+      )
       .reduce(
-        (total, item) => total + Number(item.amount || 0),
+        (total, item) =>
+          total + Number(item.amount || 0),
         0
       );
   }, [items]);
 
-  const totalOperational = totalCost + totalLoss;
+  const totalOperational =
+    totalCost + totalLoss;
 
   const filteredItems = useMemo(() => {
-    const keyword = filters.search.trim().toLowerCase();
+    const keyword = filters.search
+      .trim()
+      .toLowerCase();
 
     return items.filter((item) => {
       const matchesType =
@@ -148,12 +249,16 @@ export default function OperationalCost() {
 
       const categoryLabel =
         ALL_CATEGORIES.find(
-          (category) => category.value === item.category
+          (category) =>
+            category.value === item.category
         )?.label || item.category;
 
       const matchesSearch =
         !keyword ||
-        item.description
+        (item.code || "")
+          .toLowerCase()
+          .includes(keyword) ||
+        (item.description || "")
           .toLowerCase()
           .includes(keyword) ||
         (item.notes || "")
@@ -192,7 +297,8 @@ export default function OperationalCost() {
   };
 
   const handleAmountChange = (event) => {
-    const rawValue = event.target.value.replace(/\D/g, "");
+    const rawValue =
+      event.target.value.replace(/\D/g, "");
 
     setForm((prev) => ({
       ...prev,
@@ -200,7 +306,9 @@ export default function OperationalCost() {
     }));
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
+    if (saving) return;
+
     if (!form.costDate) {
       alert("Tanggal wajib diisi.");
       return;
@@ -211,28 +319,62 @@ export default function OperationalCost() {
       return;
     }
 
-    if (!form.amount || Number(form.amount) <= 0) {
+    if (
+      !form.amount ||
+      Number(form.amount) <= 0
+    ) {
       alert("Jumlah harus lebih dari 0.");
       return;
     }
 
-    const newItem = {
-      id: Date.now(),
-      ...form,
-      description: form.description.trim(),
-      notes: form.notes.trim(),
-      amount: Number(form.amount),
-    };
+    setSaving(true);
 
-    setItems((prev) => [newItem, ...prev]);
+    try {
+      const payload = {
+        code: generateOperationalCostCode(),
+        cost_date: form.costDate,
+        cost_type: form.costType,
+        category: form.category,
+        description: form.description.trim(),
+        amount: Number(form.amount),
+        notes: form.notes.trim(),
+        status: "POSTED",
+      };
 
-    resetForm();
+      const created =
+        await base44.entities.OperationalCost.create(
+          payload
+        );
+
+      if (created?.id) {
+        setItems((prev) => [
+          mapOperationalCost(created),
+          ...prev,
+        ]);
+      } else {
+        await loadOperationalCosts();
+      }
+
+      resetForm();
+    } catch (error) {
+      console.error(
+        "OperationalCost create error:",
+        error
+      );
+
+      alert(
+        "Gagal menyimpan Cost & Loss ke database."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const getTypeLabel = (value) => {
     return (
-      COST_TYPES.find((item) => item.value === value)
-        ?.title || value
+      COST_TYPES.find(
+        (item) => item.value === value
+      )?.title || value
     );
   };
 
@@ -321,6 +463,7 @@ export default function OperationalCost() {
       </div>
 
       <div className="grid lg:grid-cols-[380px_minmax(0,1fr)] gap-6">
+
         {/* FORM */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm h-fit">
           <div className="mb-6">
@@ -334,7 +477,6 @@ export default function OperationalCost() {
           </div>
 
           <div className="space-y-5">
-            {/* TYPE BUTTONS */}
             <div>
               <Label className="mb-2 block">
                 Jenis
@@ -343,6 +485,7 @@ export default function OperationalCost() {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
+                  disabled={saving}
                   onClick={() =>
                     handleTypeChange("COST")
                   }
@@ -373,6 +516,7 @@ export default function OperationalCost() {
 
                 <button
                   type="button"
+                  disabled={saving}
                   onClick={() =>
                     handleTypeChange("LOSS")
                   }
@@ -408,6 +552,7 @@ export default function OperationalCost() {
 
               <Input
                 type="date"
+                disabled={saving}
                 value={form.costDate}
                 onChange={(e) =>
                   setForm((prev) => ({
@@ -423,6 +568,7 @@ export default function OperationalCost() {
               <Label>Kategori</Label>
 
               <Select
+                disabled={saving}
                 value={form.category}
                 onValueChange={(value) =>
                   setForm((prev) => ({
@@ -436,14 +582,16 @@ export default function OperationalCost() {
                 </SelectTrigger>
 
                 <SelectContent>
-                  {availableCategories.map((item) => (
-                    <SelectItem
-                      key={item.value}
-                      value={item.value}
-                    >
-                      {item.label}
-                    </SelectItem>
-                  ))}
+                  {availableCategories.map(
+                    (item) => (
+                      <SelectItem
+                        key={item.value}
+                        value={item.value}
+                      >
+                        {item.label}
+                      </SelectItem>
+                    )
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -452,6 +600,7 @@ export default function OperationalCost() {
               <Label>Keterangan</Label>
 
               <Textarea
+                disabled={saving}
                 value={form.description}
                 placeholder={
                   form.costType === "COST"
@@ -461,7 +610,8 @@ export default function OperationalCost() {
                 onChange={(e) =>
                   setForm((prev) => ({
                     ...prev,
-                    description: e.target.value,
+                    description:
+                      e.target.value,
                   }))
                 }
                 rows={3}
@@ -480,10 +630,15 @@ export default function OperationalCost() {
                 <input
                   type="text"
                   inputMode="numeric"
-                  value={formatNumber(form.amount)}
+                  disabled={saving}
+                  value={formatNumber(
+                    form.amount
+                  )}
                   placeholder="0"
-                  onChange={handleAmountChange}
-                  className="w-full px-3 py-2 outline-none text-slate-900 font-semibold tabular-nums bg-transparent"
+                  onChange={
+                    handleAmountChange
+                  }
+                  className="w-full px-3 py-2 outline-none text-slate-900 font-semibold tabular-nums bg-transparent disabled:opacity-50"
                 />
               </div>
             </div>
@@ -497,6 +652,7 @@ export default function OperationalCost() {
               </Label>
 
               <Textarea
+                disabled={saving}
                 value={form.notes}
                 placeholder="Informasi tambahan bila diperlukan"
                 onChange={(e) =>
@@ -512,10 +668,23 @@ export default function OperationalCost() {
 
             <Button
               onClick={handleAdd}
+              disabled={saving}
               className="w-full gap-2"
             >
-              <Plus className="w-4 h-4" />
-              Simpan {form.costType === "COST" ? "Biaya" : "Loss"}
+              {saving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Menyimpan...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  Simpan{" "}
+                  {form.costType === "COST"
+                    ? "Biaya"
+                    : "Loss"}
+                </>
+              )}
             </Button>
           </div>
         </div>
@@ -530,7 +699,9 @@ export default function OperationalCost() {
                 </h2>
 
                 <p className="text-sm text-slate-500 mt-1">
-                  {items.length} transaksi tercatat
+                  {loading
+                    ? "Memuat data..."
+                    : `${items.length} transaksi tercatat`}
                 </p>
               </div>
 
@@ -543,7 +714,8 @@ export default function OperationalCost() {
                     onChange={(e) =>
                       setFilters((prev) => ({
                         ...prev,
-                        search: e.target.value,
+                        search:
+                          e.target.value,
                       }))
                     }
                     placeholder="Cari transaksi..."
@@ -578,11 +750,61 @@ export default function OperationalCost() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={loading}
+                  onClick={
+                    loadOperationalCosts
+                  }
+                  title="Refresh data"
+                >
+                  <RefreshCw
+                    className={`w-4 h-4 ${
+                      loading
+                        ? "animate-spin"
+                        : ""
+                    }`}
+                  />
+                </Button>
               </div>
             </div>
           </div>
 
-          {items.length === 0 ? (
+          {loadError ? (
+            <div className="py-16 px-6 text-center">
+              <AlertTriangle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
+
+              <p className="font-semibold text-slate-800">
+                Gagal memuat data
+              </p>
+
+              <p className="text-sm text-slate-500 mt-1">
+                {loadError}
+              </p>
+
+              <Button
+                variant="outline"
+                onClick={
+                  loadOperationalCosts
+                }
+                className="mt-4 gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Coba Lagi
+              </Button>
+            </div>
+          ) : loading ? (
+            <div className="py-20 px-6 text-center">
+              <Loader2 className="w-7 h-7 text-slate-400 animate-spin mx-auto mb-3" />
+
+              <p className="text-sm text-slate-500">
+                Memuat Cost & Loss...
+              </p>
+            </div>
+          ) : items.length === 0 ? (
             <div className="py-20 px-6 text-center">
               <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
                 <FileText className="w-5 h-5 text-slate-400" />
@@ -593,7 +815,8 @@ export default function OperationalCost() {
               </p>
 
               <p className="text-sm text-slate-400 mt-1 max-w-sm mx-auto">
-                Transaksi yang ditambahkan akan muncul di sini.
+                Transaksi yang disimpan akan
+                muncul di sini.
               </p>
             </div>
           ) : filteredItems.length === 0 ? (
@@ -646,62 +869,83 @@ export default function OperationalCost() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-100">
-                  {filteredItems.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="hover:bg-slate-50/70 transition-colors"
-                    >
-                      <td className="px-5 py-4 text-slate-600 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <CalendarDays className="w-4 h-4 text-slate-400" />
+                  {filteredItems.map(
+                    (item) => (
+                      <tr
+                        key={item.id}
+                        className="hover:bg-slate-50/70 transition-colors"
+                      >
+                        <td className="px-5 py-4 text-slate-600 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <CalendarDays className="w-4 h-4 text-slate-400" />
 
-                          {formatDisplayDate(item.costDate)}
-                        </div>
-                      </td>
+                            {formatDisplayDate(
+                              item.costDate
+                            )}
+                          </div>
+                        </td>
 
-                      <td className="px-5 py-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                            item.costType === "COST"
-                              ? "bg-indigo-50 text-indigo-700"
-                              : "bg-rose-50 text-rose-700"
-                          }`}
-                        >
-                          {item.costType === "LOSS" && (
-                            <AlertTriangle className="w-3 h-3" />
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                              item.costType ===
+                              "COST"
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "bg-rose-50 text-rose-700"
+                            }`}
+                          >
+                            {item.costType ===
+                              "LOSS" && (
+                              <AlertTriangle className="w-3 h-3" />
+                            )}
+
+                            {getTypeLabel(
+                              item.costType
+                            )}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4 text-slate-600 whitespace-nowrap">
+                          {getCategoryLabel(
+                            item.category
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <p className="font-medium text-slate-900">
+                            {
+                              item.description
+                            }
+                          </p>
+
+                          {item.code && (
+                            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                              {item.code}
+                            </p>
                           )}
 
-                          {getTypeLabel(item.costType)}
-                        </span>
-                      </td>
+                          {item.notes && (
+                            <p className="text-xs text-slate-400 mt-1 line-clamp-1">
+                              {item.notes}
+                            </p>
+                          )}
+                        </td>
 
-                      <td className="px-5 py-4 text-slate-600 whitespace-nowrap">
-                        {getCategoryLabel(item.category)}
-                      </td>
-
-                      <td className="px-5 py-4">
-                        <p className="font-medium text-slate-900">
-                          {item.description}
-                        </p>
-
-                        {item.notes && (
-                          <p className="text-xs text-slate-400 mt-1 line-clamp-1">
-                            {item.notes}
-                          </p>
-                        )}
-                      </td>
-
-                      <td
-                        className={`px-5 py-4 text-right font-bold tabular-nums whitespace-nowrap ${
-                          item.costType === "LOSS"
-                            ? "text-rose-600"
-                            : "text-slate-900"
-                        }`}
-                      >
-                        {formatCurrency(item.amount)}
-                      </td>
-                    </tr>
-                  ))}
+                        <td
+                          className={`px-5 py-4 text-right font-bold tabular-nums whitespace-nowrap ${
+                            item.costType ===
+                            "LOSS"
+                              ? "text-rose-600"
+                              : "text-slate-900"
+                          }`}
+                        >
+                          {formatCurrency(
+                            item.amount
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  )}
                 </tbody>
               </table>
             </div>
@@ -709,14 +953,28 @@ export default function OperationalCost() {
         </div>
       </div>
 
-      {/* PHASE INFO */}
-      <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-        <p className="text-sm text-amber-800">
-          <strong>Phase 1:</strong>{" "}
-          Cost & Loss masih menggunakan data sementara.
-          Belum ada perubahan pada database Base44, stok,
-          HPP, atau laporan laba rugi.
-        </p>
+      {/* DATABASE STATUS */}
+      <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+        <div className="flex gap-3">
+          <Database className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+
+          <div>
+            <p className="text-sm text-emerald-800">
+              <strong>
+                Cost & Loss Database Active
+              </strong>
+              {" — "}
+              transaksi Cost & Loss disimpan
+              pada database Base44.
+            </p>
+
+            <p className="text-xs text-emerald-700/80 mt-1">
+              Tahap ini belum mengubah stok,
+              HPP, Stock Adjustment, atau
+              perhitungan laporan laba rugi.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
