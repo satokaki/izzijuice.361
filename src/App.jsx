@@ -80,7 +80,7 @@ const AuthenticatedApp = () => {
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/payments" element={<Payments />} />
           <Route path="/stock-card" element={<StockCard />} />
-          <Route path="/operational-cost" element={<OperationalCost />} />
+          <Route path="/operationalCost" element={<OperationalCost />} />
           <Route path="/reports/sales" element={<SalesReport />} />
           <Route path="/reports/receivables" element={<ReceivablesReport />} />
           <Route path="/reports/inventory" element={<InventoryReport />} />
