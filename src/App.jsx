@@ -43,7 +43,12 @@ import LandingRedirect from '@/components/LandingRedirect';
 import PermissionGuard from '@/components/PermissionGuard';
 
 const AuthenticatedApp = () => {
-  const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
+  const {
+    isLoadingAuth,
+    isLoadingPublicSettings,
+    authError,
+    navigateToLogin
+  } = useAuth();
 
   // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || isLoadingAuth) {
@@ -59,7 +64,6 @@ const AuthenticatedApp = () => {
     if (authError.type === 'user_not_registered') {
       return <UserNotRegisteredError />;
     } else if (authError.type === 'auth_required') {
-      // Redirect to login automatically
       navigateToLogin();
       return null;
     }
@@ -71,6 +75,8 @@ const AuthenticatedApp = () => {
       <Route element={<Layout />}>
         <Route element={<PermissionGuard />}>
           <Route path="/" element={<LandingRedirect />} />
+
+          {/* Operasional */}
           <Route path="/recipes" element={<Recipes />} />
           <Route path="/production" element={<Production />} />
           <Route path="/bottling" element={<Bottling />} />
@@ -80,16 +86,39 @@ const AuthenticatedApp = () => {
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/payments" element={<Payments />} />
           <Route path="/stock-card" element={<StockCard />} />
-          <Route path="/operationalCost" element={<OperationalCost />} />
+
+          {/* Biaya Operasional */}
+          <Route
+            path="/operationalCost"
+            element={<OperationalCost />}
+          />
+
+          {/* Laporan */}
           <Route path="/reports/sales" element={<SalesReport />} />
-          <Route path="/reports/receivables" element={<ReceivablesReport />} />
-          <Route path="/reports/inventory" element={<InventoryReport />} />
-          <Route path="/reports/profit-loss" element={<ProfitLossReport />} />
-          <Route path="/traceability" element={<BatchTraceability />} />
+          <Route
+            path="/reports/receivables"
+            element={<ReceivablesReport />}
+          />
+          <Route
+            path="/reports/inventory"
+            element={<InventoryReport />}
+          />
+          <Route
+            path="/reports/profit-loss"
+            element={<ProfitLossReport />}
+          />
+          <Route
+            path="/traceability"
+            element={<BatchTraceability />}
+          />
           <Route path="/hpp" element={<Hpp />} />
+
+          {/* Sistem */}
           <Route path="/settings" element={<Settings />} />
           <Route path="/database" element={<DatabaseManagement />} />
           <Route path="/assistant" element={<Assistant />} />
+
+          {/* Master Data */}
           <Route path="/master/brands" element={<Brands />} />
           <Route path="/master/categories" element={<Categories />} />
           <Route path="/master/suppliers" element={<Suppliers />} />
@@ -99,19 +128,21 @@ const AuthenticatedApp = () => {
           <Route path="/master/warehouses" element={<Warehouses />} />
         </Route>
       </Route>
+
+      {/* Public routes */}
       <Route path="/no-access" element={<NoAccess />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+
+      {/* 404 */}
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );
 };
 
-
 function App() {
-
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>
@@ -119,10 +150,11 @@ function App() {
           <ScrollToTop />
           <AuthenticatedApp />
         </Router>
+
         <Toaster />
       </QueryClientProvider>
     </AuthProvider>
-  )
+  );
 }
 
 export default App
