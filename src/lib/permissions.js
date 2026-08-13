@@ -34,42 +34,42 @@ export const MENU_CATALOG = [
 
   {
     key: 'dashboard_operations',
-    label: 'Dashboard Â· Operasional Produksi',
+    label: 'Dashboard · Operasional Produksi',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_stock',
-    label: 'Dashboard Â· Stok Operasional',
+    label: 'Dashboard · Stok Operasional',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_inventory_value',
-    label: 'Dashboard Â· Nilai Persediaan',
+    label: 'Dashboard · Nilai Persediaan',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_sales',
-    label: 'Dashboard Â· Penjualan',
+    label: 'Dashboard · Penjualan',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_receivables',
-    label: 'Dashboard Â· Piutang',
+    label: 'Dashboard · Piutang',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_activity',
-    label: 'Dashboard Â· Aktivitas Terbaru',
+    label: 'Dashboard · Aktivitas Terbaru',
     group: 'utama',
     actions: ['view']
   },
@@ -92,7 +92,7 @@ export const MENU_CATALOG = [
   },
 
   /**
-   * SECURITY PATCH â€” Production Download Permission
+   * SECURITY PATCH Ã¢â‚¬â€ Production Download Permission
    *
    * `view` dan `download` dipisahkan.
    *
@@ -1530,3 +1530,5 @@ export function isRecipeFormulaHidden(
       'ADMIN_ONLY'
   );
 }
+
+
