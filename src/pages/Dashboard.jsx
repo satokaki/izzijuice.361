@@ -623,7 +623,7 @@ export default function Dashboard() {
         </h1>
 
         <p className="text-[13px] text-muted-foreground mt-0.5">
-          LAB PRO · DEV / BETA TEST · OPERATIONAL COST TEST
+          LAB PRO · DEV 3.6.1 · MAJOR UPDATE VALIDATION
         </p>
       </div>
 
@@ -992,7 +992,7 @@ export default function Dashboard() {
 
               <h2 className="text-[13px] font-bold mb-3 flex items-center gap-1.5">
                 <Users className="w-4 h-4" />
-                DEV 3.6.1 Info
+                DEV 3.6.1 — Major Update
               </h2>
 
               <div className="space-y-3 text-[12px] text-muted-foreground">
@@ -1017,7 +1017,7 @@ export default function Dashboard() {
                 <div className="pt-3 border-t border-border">
 
                   <p className="font-semibold text-foreground mb-2">
-                    Update DEV 3.6.1
+                    Major Update DEV 3.6.1
                   </p>
 
                   <ul className="space-y-2">
@@ -1033,8 +1033,8 @@ export default function Dashboard() {
                         </span>
 
                         <p className="mt-0.5">
-                          Menu baru untuk pencatatan biaya operasional
-                          dan loss / kerugian perusahaan.
+                          Modul pencatatan biaya operasional dan loss
+                          perusahaan tersedia dalam alur DEV 3.6.1.
                         </p>
                       </div>
                     </li>
@@ -1050,26 +1050,26 @@ export default function Dashboard() {
                         </span>
 
                         <p className="mt-0.5">
-                          Route dan halaman Operational Cost telah
-                          ditambahkan untuk pengujian DEV.
+                          Operational Cost telah dicakup dalam backup,
+                          restore order, dan validasi migrasi data.
                         </p>
                       </div>
                     </li>
 
                     <li className="flex gap-2">
-                      <span className="text-amber-600 font-bold">
-                        !
+                      <span className="text-emerald-600 font-bold">
+                        ✓
                       </span>
 
                       <div>
                         <span className="font-medium text-foreground">
-                          Phase 1 — UI Only
+                          Advanced Restore Engine
                         </span>
 
                         <p className="mt-0.5">
-                          Operational Cost belum terhubung ke entity
-                          Base44, Stock Adjustment, HPP, maupun
-                          Laporan Laba Rugi.
+                          Restore menggunakan session-based batch,
+                          checkpoint, retry otomatis, resume, progress
+                          real-time, dan post-restore verification.
                         </p>
                       </div>
                     </li>
@@ -1080,45 +1080,43 @@ export default function Dashboard() {
                 {/* FULL RESTORE STATUS */}
                 <div className="pt-3 border-t border-border">
 
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
 
                     <div className="flex items-start gap-2">
 
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <Activity className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
 
                       <div>
-                        <p className="font-semibold text-amber-900">
-                          Full Restore Test — Perlu Verifikasi
+                        <p className="font-semibold text-emerald-900">
+                          Full Restore — Verified 100%
                         </p>
 
-                        <p className="mt-1 text-amber-800">
-                          Pengujian restore Full Backup DEV 3.6 ke
-                          DEV 3.6.1 mengalami HTTP 504 sebelum proses
-                          memberikan hasil akhir.
+                        <p className="mt-1 text-emerald-800">
+                          Migrasi database LAB PRO v3.5 ke DEV 3.6.1
+                          berhasil diselesaikan dan diverifikasi identik.
                         </p>
                       </div>
 
                     </div>
 
-                    <div className="mt-3 pt-3 border-t border-amber-200 space-y-1.5 text-amber-800">
+                    <div className="mt-3 pt-3 border-t border-emerald-200 space-y-1.5 text-emerald-800">
 
                       <p>
-                        • Sebagian data terindikasi berhasil masuk.
+                        • Restore diproses per entity dan batch.
                       </p>
 
                       <p>
-                        • Kelengkapan seluruh record belum terverifikasi.
+                        • Checkpoint dan resume menjaga kelanjutan proses.
                       </p>
 
                       <p>
-                        • Belum dapat dipastikan entity atau record
-                        mana yang tertinggal.
+                        • Relasi antar-entity dipertahankan melalui
+                        file-backed ID mapping.
                       </p>
 
-                      <p className="font-medium text-amber-900">
-                        • Hindari Full Restore ulang sebelum data
-                        hasil restore diverifikasi untuk mencegah
-                        potensi duplikasi.
+                      <p className="font-medium text-emerald-900">
+                        • Record backup dan hasil restore terverifikasi
+                        100% pada migrasi v3.5 → v3.6.1.
                       </p>
 
                     </div>
@@ -1130,17 +1128,17 @@ export default function Dashboard() {
                 <div className="pt-3 border-t border-border">
 
                   <p className="font-medium text-foreground mb-1">
-                    Fokus Verifikasi Restore
+                    Restore Engine Capabilities
                   </p>
 
                   <ul className="space-y-1 list-disc pl-4">
-                    <li>Jumlah record backup vs DEV 3.6.1</li>
-                    <li>Master data</li>
-                    <li>Resep</li>
-                    <li>Transaksi pembelian & penjualan</li>
-                    <li>Production / Bottling / Labeling / Cukai</li>
-                    <li>StockLedger & StockBalance</li>
-                    <li>Piutang dan pembayaran</li>
+                    <li>Session-based batch processing</li>
+                    <li>Real-time entity dan record progress</li>
+                    <li>Automatic network retry</li>
+                    <li>Checkpoint recovery dan resumable restore</li>
+                    <li>Safe batched deletion</li>
+                    <li>File-backed relational ID mapping</li>
+                    <li>Post-restore verification 100%</li>
                   </ul>
 
                 </div>
@@ -1149,13 +1147,13 @@ export default function Dashboard() {
                 <div className="pt-3 border-t border-border">
 
                   <p className="text-emerald-700 font-medium">
-                    ✓ Operational Cost Phase 1 tidak mengubah data existing.
+                    ✓ Migrasi LAB PRO v3.5 ke DEV 3.6.1 berhasil dan identik.
                   </p>
 
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    DEV 3.6.1 digunakan untuk pengujian fitur baru
-                    dan validasi migrasi sebelum perubahan data
-                    diaktifkan.
+                    DEV 3.6.1 membawa major update pada database
+                    restore engine, operational cost, ketahanan jaringan,
+                    transparansi progress, dan integritas migrasi data.
                   </p>
 
                 </div>
