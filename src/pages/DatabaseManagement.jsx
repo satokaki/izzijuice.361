@@ -68,6 +68,10 @@ export default function DatabaseManagement() {
   const [filePhrase, setFilePhrase] = useState('');
   const [fileAck, setFileAck] = useState(false);
   const fileInputRef = useRef(null);
+  
+  // Batch restore progress
+  const [restoreProgress, setRestoreProgress] = useState(null);
+  const [restoreRunning, setRestoreRunning] = useState(false);
 
   // Download permission is enforced by admin role on backend; DatabaseBackup RLS is admin-only.
   const downloadAllowed = true;
