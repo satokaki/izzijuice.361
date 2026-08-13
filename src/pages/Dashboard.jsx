@@ -93,6 +93,8 @@ export default function Dashboard() {
 
   const [recentActivity, setRecentActivity] = useState([]);
   const [inventoryValue, setInventoryValue] = useState(0);
+  const [lowStockDetails, setLowStockDetails] = useState([]);
+  const [showLowStockDetails, setShowLowStockDetails] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const isAdmin = currentUser?.role === 'admin';
@@ -377,6 +379,33 @@ export default function Dashboard() {
           new Map()
         );
 
+      const lowStockItems =
+        access.dashboardStock &&
+        access.stockCard
+          ? materials
+              .map(material => ({
+                id: material.id,
+                code: material.code || '',
+                name: material.name || '-',
+                unit: material.unit || '',
+                minimumStock:
+                  Number(material.min_stock) || 0,
+                availableStock:
+                  availableMaterialStockById.get(
+                    material.id
+                  ) || 0,
+              }))
+              .filter(item =>
+                item.minimumStock > 0 &&
+                item.availableStock < item.minimumStock
+              )
+              .sort((a, b) =>
+                a.name.localeCompare(b.name)
+              )
+          : [];
+
+      setLowStockDetails(lowStockItems);
+
       setStats({
         activeMaterials:
           access.dashboardOperations &&
@@ -389,20 +418,7 @@ export default function Dashboard() {
         lowStockMaterials:
           access.dashboardStock &&
           access.stockCard
-            ? materials.filter(material => {
-                const minimumStock =
-                  Number(material.min_stock) || 0;
-
-                const availableStock =
-                  availableMaterialStockById.get(
-                    material.id
-                  ) || 0;
-
-                return (
-                  minimumStock > 0 &&
-                  availableStock < minimumStock
-                );
-              }).length
+            ? lowStockItems.length
             : 0,
 
         activeProduction:
@@ -714,6 +730,9 @@ export default function Dashboard() {
               label="Stok Minimum"
               value={stats.lowStockMaterials}
               color="bg-red-50 text-red-600"
+              onClick={() =>
+                setShowLowStockDetails(value => !value)
+              }
             />
           )}
 
@@ -813,6 +832,74 @@ export default function Dashboard() {
             />
           )}
 
+        </div>
+      )}
+
+      {(
+        access.dashboardStock &&
+        access.stockCard &&
+        showLowStockDetails
+      ) && (
+        <div className="bg-white border border-red-200 rounded-lg p-4 mb-5">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h2 className="text-[13px] font-bold flex items-center gap-1.5 text-red-700">
+                <AlertTriangle className="w-4 h-4" />
+                Rincian Stok Minimum
+              </h2>
+              <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                Bahan aktif dengan stok tersedia di bawah batas minimum.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowLowStockDetails(false)}
+              className="text-[12px] font-medium text-muted-foreground hover:text-foreground"
+            >
+              Tutup
+            </button>
+          </div>
+
+          {lowStockDetails.length === 0 ? (
+            <div className="text-[12.5px] text-muted-foreground py-2">
+              Tidak ada bahan di bawah stok minimum.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12.5px]">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground">
+                    <th className="font-medium px-2 py-2">Bahan</th>
+                    <th className="font-medium px-2 py-2 text-right">Stok Tersedia</th>
+                    <th className="font-medium px-2 py-2 text-right">Stok Minimum</th>
+                    <th className="font-medium px-2 py-2">Satuan</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lowStockDetails.map(item => (
+                    <tr key={item.id} className="border-b border-border/60 last:border-0">
+                      <td className="px-2 py-2.5">
+                        <div className="font-medium">{item.name}</div>
+                        {item.code && (
+                          <div className="text-[11px] text-muted-foreground font-mono">
+                            {item.code}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5 text-right font-bold text-red-600 tabular-nums">
+                        {item.availableStock.toLocaleString('id-ID')}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {item.minimumStock.toLocaleString('id-ID')}
+                      </td>
+                      <td className="px-2 py-2.5">{item.unit || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
