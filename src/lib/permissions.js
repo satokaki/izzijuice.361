@@ -34,42 +34,42 @@ export const MENU_CATALOG = [
 
   {
     key: 'dashboard_operations',
-    label: 'Dashboard · Operasional Produksi',
+    label: 'Dashboard Â· Operasional Produksi',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_stock',
-    label: 'Dashboard · Stok Operasional',
+    label: 'Dashboard Â· Stok Operasional',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_inventory_value',
-    label: 'Dashboard · Nilai Persediaan',
+    label: 'Dashboard Â· Nilai Persediaan',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_sales',
-    label: 'Dashboard · Penjualan',
+    label: 'Dashboard Â· Penjualan',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_receivables',
-    label: 'Dashboard · Piutang',
+    label: 'Dashboard Â· Piutang',
     group: 'utama',
     actions: ['view']
   },
 
   {
     key: 'dashboard_activity',
-    label: 'Dashboard · Aktivitas Terbaru',
+    label: 'Dashboard Â· Aktivitas Terbaru',
     group: 'utama',
     actions: ['view']
   },
@@ -92,7 +92,7 @@ export const MENU_CATALOG = [
   },
 
   /**
-   * SECURITY PATCH — Production Download Permission
+   * SECURITY PATCH â€” Production Download Permission
    *
    * `view` dan `download` dipisahkan.
    *
@@ -269,6 +269,18 @@ export const MENU_CATALOG = [
     label: 'Laporan Laba Rugi',
     group: 'laporan',
     actions: ['view']
+  },
+
+  {
+    key: 'operational_cost',
+    label: 'Operational Cost',
+    group: 'laporan',
+    actions: [
+      'view',
+      'create',
+      'edit',
+      'delete'
+    ]
   },
 
   // =========================================================
@@ -1221,6 +1233,11 @@ export const ROUTE_ACCESS = [
   {
     route: '/reports/profit-loss',
     perm: 'report_profit_loss'
+  },
+
+  {
+    route: '/operational-cost',
+    perm: 'operational_cost'
   },
 
   {
