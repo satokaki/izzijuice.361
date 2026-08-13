@@ -170,8 +170,14 @@ export default function Dashboard() {
       }
 
       if (
-        access.dashboardOperations &&
-        access.materials
+        (
+          access.dashboardOperations &&
+          access.materials
+        ) ||
+        (
+          access.dashboardStock &&
+          access.stockCard
+        )
       ) {
         requests.materials =
           base44.entities.Material
@@ -338,6 +344,33 @@ export default function Dashboard() {
               )
           : 0;
 
+      /*
+       * LOW STOCK KPI SOURCE OF TRUTH
+       *
+       * Jumlahkan stok aktual seluruh StockBalance per bahan.
+       * Material tanpa balance dianggap memiliki stok 0.
+       */
+      const materialStockById =
+        operationalBalances.reduce(
+          (stockById, balance) => {
+            if (
+              balance.item_type !== 'material' ||
+              !balance.item_id
+            ) {
+              return stockById;
+            }
+
+            stockById.set(
+              balance.item_id,
+              (stockById.get(balance.item_id) || 0) +
+                (Number(balance.quantity) || 0)
+            );
+
+            return stockById;
+          },
+          new Map()
+        );
+
       setStats({
         activeMaterials:
           access.dashboardOperations &&
@@ -347,7 +380,23 @@ export default function Dashboard() {
               ).length
             : 0,
 
-        lowStockMaterials: 0,
+        lowStockMaterials:
+          access.dashboardStock &&
+          access.stockCard
+            ? materials.filter(material => {
+                const minimumStock =
+                  Number(material.minimum_stock) || 0;
+
+                const actualStock =
+                  materialStockById.get(material.id) || 0;
+
+                return (
+                  material.is_active &&
+                  minimumStock > 0 &&
+                  actualStock < minimumStock
+                );
+              }).length
+            : 0,
 
         activeProduction:
           access.dashboardOperations &&
