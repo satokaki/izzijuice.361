@@ -432,7 +432,7 @@ export default async function (req) {
     let autoBackupCode =
       null;
 
-    if (autoBackup) {
+    if (false) {
       const ab =
         await createBackup(
           base44,
