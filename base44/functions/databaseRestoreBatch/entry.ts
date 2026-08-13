@@ -33,6 +33,8 @@ const MAX_BATCH_SIZE = 50;
 const DEFAULT_BATCH_SIZE = 10;
 const DELETE_BATCH_SIZE = 10;
 const MAX_RETRIES = 5;
+const ID_MAP_FILE_PREFIX = '@file:';
+const MAX_INLINE_ID_MAP_SIZE = 6000;
 
 /* ==========================================================
    GENERAL HELPERS
@@ -285,6 +287,157 @@ async function loadBackupTables(
   }
 
   return parsed.tables;
+}
+
+/* ==========================================================
+   FILE-BACKED ID MAP CHECKPOINT
+========================================================== */
+
+async function loadIdMaps(
+  base44,
+  session
+) {
+  const stored =
+    session.id_maps_json ||
+    '';
+
+  if (
+    !stored.startsWith(
+      ID_MAP_FILE_PREFIX
+    )
+  ) {
+    return safeJsonParse(
+      stored,
+      {}
+    );
+  }
+
+  const fileUri =
+    stored.slice(
+      ID_MAP_FILE_PREFIX.length
+    );
+
+  if (!fileUri) {
+    return {};
+  }
+
+  const signed =
+    await base44
+      .asServiceRole
+      .integrations
+      .Core
+      .CreateFileSignedUrl({
+        file_uri:
+          fileUri,
+
+        expires_in: 120,
+      });
+
+  const response =
+    await fetch(
+      signed.signed_url
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      `Gagal membaca checkpoint ID map ` +
+      `(HTTP ${response.status}).`
+    );
+  }
+
+  try {
+    return JSON.parse(
+      await response.text()
+    );
+  } catch {
+    throw new Error(
+      'Checkpoint ID map tidak dapat diparse.'
+    );
+  }
+}
+
+async function saveIdMaps(
+  base44,
+  session,
+  idMaps
+) {
+  const content =
+    JSON.stringify(
+      idMaps || {}
+    );
+
+  /*
+   * Map kecil tetap inline agar invocation awal hemat storage.
+   * Setelah melewati batas atau sudah file-backed, seluruh map
+   * disimpan sebagai private file dan field hanya menyimpan URI.
+   */
+  if (
+    content.length <=
+      MAX_INLINE_ID_MAP_SIZE &&
+    !String(
+      session.id_maps_json || ''
+    ).startsWith(
+      ID_MAP_FILE_PREFIX
+    )
+  ) {
+    return content;
+  }
+
+  const safeSessionCode =
+    String(
+      session.session_code ||
+      session.id ||
+      'restore'
+    ).replace(
+      /[^a-zA-Z0-9_-]/g,
+      '_'
+    );
+
+  const checkpoint =
+    Number(
+      session.total_processed ||
+      session.current_offset ||
+      0
+    );
+
+  const file =
+    new File(
+      [
+        new Blob(
+          [content]
+        ),
+      ],
+      `RESTORE_IDMAP_${safeSessionCode}_${checkpoint}_${Date.now()}.json`,
+      {
+        type:
+          'application/json',
+      }
+    );
+
+  const uploaded =
+    await retryOperation(
+      () =>
+        base44
+          .asServiceRole
+          .integrations
+          .Core
+          .UploadPrivateFile({
+            file,
+          }),
+
+      'Upload checkpoint ID map'
+    );
+
+  if (!uploaded?.file_uri) {
+    throw new Error(
+      'Upload checkpoint ID map tidak mengembalikan file_uri.'
+    );
+  }
+
+  return (
+    ID_MAP_FILE_PREFIX +
+    uploaded.file_uri
+  );
 }
 
 /* ==========================================================
@@ -1144,9 +1297,9 @@ async function processRestorePhase({
     );
 
   const idMaps =
-    safeJsonParse(
-      session.id_maps_json,
-      {}
+    await loadIdMaps(
+      base44,
+      session
     );
 
   /*
@@ -1538,6 +1691,21 @@ async function processRestorePhase({
       'RESTORE'
     );
 
+  const idMapsCheckpoint =
+    await saveIdMaps(
+      base44,
+      {
+        ...session,
+        total_processed:
+          progress.processed,
+        current_offset:
+          restored[
+            entityName
+          ],
+      },
+      idMaps
+    );
+
   session =
     await updateSession(
       base44,
@@ -1562,9 +1730,7 @@ async function processRestorePhase({
           ),
 
         id_maps_json:
-          JSON.stringify(
-            idMaps
-          ),
+          idMapsCheckpoint,
 
         completed_entities_json:
           JSON.stringify(
