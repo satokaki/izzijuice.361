@@ -220,23 +220,444 @@ export default function DatabaseManagement() {
   };
 
   const doFileRestore = async () => {
-    if (!uploadedFile) { toast({ variant: 'destructive', title: 'Pilih file backup' }); return; }
-    if (!preview) { toast({ variant: 'destructive', title: 'File belum tervalidasi' }); return; }
-    if (filePhrase !== RESTORE_CONFIRM_PHRASE) { toast({ variant: 'destructive', title: 'Kalimat konfirmasi belum sesuai' }); return; }
-    if (!fileAck) { toast({ variant: 'destructive', title: 'Centang pemahaman risiko' }); return; }
-    setBusy(true);
-    try {
-      const res = await base44.functions.invoke('databaseRestoreFromFile', {
-        file_uri: uploadedFile.file_uri, file_name: uploadedFile.file_name, mode: fileMode, confirm: filePhrase, autoBackup: true, password: needsPassword ? filePassword : undefined,
-      });
-      toast({ title: 'Restore dari file selesai', description: res.data?.backup_code || '' });
-      setFileOpen(false); resetFileState();
-      loadBackups();
-    } catch (e) {
-      toast({ variant: 'destructive', title: 'Restore gagal', description: e.response?.data?.error || e.message });
+  if (!uploadedFile) {
+    toast({
+      variant: 'destructive',
+      title: 'Pilih file backup',
+    });
+    return;
+  }
+
+  if (!preview) {
+    toast({
+      variant: 'destructive',
+      title: 'File belum tervalidasi',
+    });
+    return;
+  }
+
+  if (filePhrase !== RESTORE_CONFIRM_PHRASE) {
+    toast({
+      variant: 'destructive',
+      title: 'Kalimat konfirmasi belum sesuai',
+    });
+    return;
+  }
+
+  if (!fileAck) {
+    toast({
+      variant: 'destructive',
+      title: 'Centang pemahaman risiko',
+    });
+    return;
+  }
+
+  /*
+   * Batch Restore V1 belum menyimpan password
+   * lintas request.
+   *
+   * Jangan mulai restore encrypted agar tidak
+   * berhenti setelah phase prepare.
+   */
+  if (preview?.encrypted || needsPassword) {
+    toast({
+      variant: 'destructive',
+      title: 'Batch Restore belum mendukung file terenkripsi',
+      description:
+        'Untuk pengujian Restore Batch V1 gunakan backup tanpa enkripsi.',
+    });
+    return;
+  }
+
+  setBusy(true);
+  setRestoreRunning(true);
+
+  setRestoreProgress({
+    status: 'PREPARING',
+    phase: 'PREPARE',
+
+    percent: 0,
+
+    entity: '',
+    fields: [],
+
+    batch: 0,
+    totalBatches: 0,
+
+    batchFrom: 0,
+    batchTo: 0,
+
+    entityProcessed: 0,
+    entityRecords: 0,
+
+    totalProcessed: 0,
+    totalRecords: preview?.recordCount || 0,
+
+    message: 'Memvalidasi backup dan membuat restore session...',
+  });
+
+  try {
+    /* =====================================================
+       STEP 1 — PREPARE RESTORE SESSION
+    ===================================================== */
+
+    const prepareRes =
+      await base44.functions.invoke(
+        'databaseRestoreFromFile',
+        {
+          file_uri:
+            uploadedFile.file_uri,
+
+          file_name:
+            uploadedFile.file_name,
+
+          mode:
+            fileMode,
+
+          confirm:
+            filePhrase,
+
+          autoBackup:
+            true,
+
+          password:
+            undefined,
+        }
+      );
+
+    const prepare =
+      prepareRes?.data || {};
+
+    if (
+      !prepare.ok ||
+      !prepare.session_id
+    ) {
+      throw new Error(
+        'Restore session gagal dibuat.'
+      );
     }
+
+    const sessionId =
+      prepare.session_id;
+
+    setRestoreProgress({
+      status:
+        prepare.status || 'READY',
+
+      phase:
+        'PREPARE',
+
+      percent:
+        0,
+
+      entity:
+        '',
+
+      fields:
+        [],
+
+      batch:
+        0,
+
+      totalBatches:
+        0,
+
+      batchFrom:
+        0,
+
+      batchTo:
+        0,
+
+      entityProcessed:
+        0,
+
+      entityRecords:
+        0,
+
+      totalProcessed:
+        Number(
+          prepare.total_processed || 0
+        ),
+
+      totalRecords:
+        Number(
+          prepare.total_records || 0
+        ),
+
+      entityTotal:
+        Number(
+          prepare.entity_total || 0
+        ),
+
+      entities:
+        prepare.entities || [],
+
+      sessionCode:
+        prepare.session_code || '',
+
+      backupCode:
+        prepare.backup_code || '',
+
+      message:
+        'Restore session siap. Memulai proses batch...',
+    });
+
+    /* =====================================================
+       STEP 2 — PROCESS BATCH UNTIL COMPLETE
+    ===================================================== */
+
+    let done = false;
+
+    let safetyCounter = 0;
+
+    /*
+     * Guard agar bug backend tidak membuat
+     * infinite loop di browser.
+     */
+    const MAX_BATCH_CALLS = 20000;
+
+    while (!done) {
+      safetyCounter += 1;
+
+      if (
+        safetyCounter >
+        MAX_BATCH_CALLS
+      ) {
+        throw new Error(
+          'Restore dihentikan karena jumlah batch melebihi batas keamanan.'
+        );
+      }
+
+      const batchRes =
+        await base44.functions.invoke(
+          'databaseRestoreBatch',
+          {
+            session_id:
+              sessionId,
+          }
+        );
+
+      const progress =
+        batchRes?.data || {};
+
+      if (
+        progress.status === 'FAILED' ||
+        progress.ok === false
+      ) {
+        throw new Error(
+          progress.error ||
+          `Restore gagal pada ${progress.error_entity || 'entity tidak diketahui'}`
+        );
+      }
+
+      setRestoreProgress({
+        status:
+          progress.status ||
+          'RUNNING',
+
+        phase:
+          progress.phase ||
+          'RESTORE',
+
+        percent:
+          Number(
+            progress.progress_percent || 0
+          ),
+
+        operation:
+          progress.operation || '',
+
+        entity:
+          progress.current_entity ||
+          progress.completed_entity ||
+          '',
+
+        fields:
+          Array.isArray(
+            progress.current_fields
+          )
+            ? progress.current_fields
+            : [],
+
+        strategy:
+          progress.strategy || '',
+
+        batch:
+          Number(
+            progress.batch || 0
+          ),
+
+        totalBatches:
+          Number(
+            progress.total_batches || 0
+          ),
+
+        batchFrom:
+          Number(
+            progress.batch_from || 0
+          ),
+
+        batchTo:
+          Number(
+            progress.batch_to || 0
+          ),
+
+        batchWritten:
+          Number(
+            progress.batch_written || 0
+          ),
+
+        entityProcessed:
+          Number(
+            progress.entity_processed || 0
+          ),
+
+        entityRecords:
+          Number(
+            progress.entity_records || 0
+          ),
+
+        totalProcessed:
+          Number(
+            progress.total_processed || 0
+          ),
+
+        totalRecords:
+          Number(
+            progress.total_records ||
+            prepare.total_records ||
+            0
+          ),
+
+        deleteCompleted:
+          Number(
+            progress.delete_completed || 0
+          ),
+
+        deleteTotal:
+          Number(
+            progress.delete_total || 0
+          ),
+
+        sessionCode:
+          prepare.session_code || '',
+
+        backupCode:
+          prepare.backup_code || '',
+
+        message:
+          progress.message ||
+          (
+            progress.phase === 'DELETE'
+              ? `Menghapus data lama ${progress.current_entity || ''}...`
+              : progress.phase === 'VERIFY'
+                ? 'Memverifikasi hasil restore...'
+                : progress.phase === 'COMPLETED'
+                  ? 'Restore selesai 100%.'
+                  : `Menulis ${progress.current_entity || 'data'}...`
+          ),
+      });
+
+      done =
+        progress.done === true ||
+        progress.status ===
+          'COMPLETED';
+
+      /*
+       * Beri browser kesempatan render
+       * progress sebelum request berikut.
+       */
+      if (!done) {
+        await new Promise(resolve =>
+          setTimeout(
+            resolve,
+            100
+          )
+        );
+      }
+    }
+
+    /* =====================================================
+       SUCCESS
+    ===================================================== */
+
+    setRestoreProgress(current => ({
+      ...current,
+
+      status:
+        'COMPLETED',
+
+      phase:
+        'COMPLETED',
+
+      percent:
+        100,
+
+      message:
+        'Restore selesai dan terverifikasi 100%.',
+    }));
+
+    toast({
+      title:
+        'Restore dari file selesai',
+
+      description:
+        `${prepare.backup_code || ''} · 100% verified`,
+    });
+
+    /*
+     * Beri progress 100% terlihat sebentar
+     * sebelum modal ditutup.
+     */
+    await new Promise(resolve =>
+      setTimeout(
+        resolve,
+        800
+      )
+    );
+
+    setFileOpen(false);
+
+    resetFileState();
+
+    loadBackups();
+
+  } catch (e) {
+    console.error(
+      '[BATCH RESTORE FRONTEND ERROR]',
+      e
+    );
+
+    setRestoreProgress(current => ({
+      ...(current || {}),
+
+      status:
+        'FAILED',
+
+      message:
+        e?.response?.data?.error ||
+        e?.message ||
+        'Restore gagal',
+    }));
+
+    toast({
+      variant:
+        'destructive',
+
+      title:
+        'Restore berhenti',
+
+      description:
+        e?.response?.data?.error ||
+        e?.message ||
+        'Terjadi kesalahan saat restore batch.',
+    });
+
+  } finally {
     setBusy(false);
-  };
+    setRestoreRunning(false);
+  }
+};
 
   const deleteBackup = async (b) => {
     if (!window.confirm(`Hapus record backup ${b.backup_code}? (metadata ditandai DELETED; file storage tetap)`)) return;
