@@ -26,6 +26,33 @@ async function triggerDownload(signedUrl, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+const ACTIVE_RESTORE_STORAGE_KEY = 'labpro_active_restore_session';
+const MAX_NETWORK_RETRIES = 5;
+const NETWORK_RETRY_DELAYS = [1000, 2000, 4000, 8000, 12000];
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientNetworkError = (error) => {
+  if (error?.restoreData) return false;
+
+  const status = Number(error?.response?.status || 0);
+  const message = String(
+    error?.response?.data?.error || error?.message || error || ''
+  ).toLowerCase();
+
+  return (
+    [408, 429, 502, 503, 504].includes(status) ||
+    error?.code === 'ERR_NETWORK' ||
+    error?.code === 'ECONNABORTED' ||
+    message.includes('network error') ||
+    message.includes('failed to fetch') ||
+    message.includes('load failed') ||
+    message.includes('timeout') ||
+    message.includes('cloudflare') ||
+    message.includes('invalid or incomplete response')
+  );
+};
+
 export default function DatabaseManagement() {
   const { toast } = useToast();
   const [backups, setBackups] = useState([]);
@@ -72,6 +99,8 @@ export default function DatabaseManagement() {
   // Batch restore progress
   const [restoreProgress, setRestoreProgress] = useState(null);
   const [restoreRunning, setRestoreRunning] = useState(false);
+  const [resumableSession, setResumableSession] = useState(null);
+  const [resumeChecking, setResumeChecking] = useState(false);
 
   // Download permission is enforced by admin role on backend; DatabaseBackup RLS is admin-only.
   const downloadAllowed = true;
@@ -88,6 +117,39 @@ export default function DatabaseManagement() {
   }, []);
 
   useEffect(() => { loadBackups(); }, [loadBackups]);
+
+  const findResumableSession = useCallback(async () => {
+    if (restoreRunning) return;
+    setResumeChecking(true);
+    try {
+      const stored = JSON.parse(localStorage.getItem(ACTIVE_RESTORE_STORAGE_KEY) || 'null');
+      const rows = await base44.entities.DatabaseRestoreSession.list('-created_date', 20);
+      const activeRows = (rows || []).filter((row) =>
+        ['READY', 'RUNNING', 'PAUSED', 'VERIFYING'].includes(row.status)
+      );
+      const active = activeRows.find((row) => row.id === stored?.id) || activeRows[0] || null;
+      setResumableSession(active);
+      if (active) {
+        localStorage.setItem(ACTIVE_RESTORE_STORAGE_KEY, JSON.stringify({
+          id: active.id,
+          sessionCode: active.session_code || '',
+          backupCode: active.backup_code || '',
+          fileName: active.file_name || '',
+          totalRecords: Number(active.total_records || 0),
+        }));
+      } else {
+        localStorage.removeItem(ACTIVE_RESTORE_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.warn('[RESTORE SESSION LOOKUP FAILED]', error);
+    } finally {
+      setResumeChecking(false);
+    }
+  }, [restoreRunning]);
+
+  useEffect(() => {
+    if (fileOpen && !restoreRunning) findResumableSession();
+  }, [fileOpen, restoreRunning, findResumableSession]);
 
   const fmtSize = (b) => { if (!b) return '-'; if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'; return (b / 1048576).toFixed(2) + ' MB'; };
   const fmtDate = (d) => (d ? new Date(d).toLocaleString('id-ID') : '-');
@@ -228,6 +290,157 @@ export default function DatabaseManagement() {
     setBusy(false);
   };
 
+  const invokeRestoreBatchWithRetry = async (sessionId) => {
+    let lastError;
+
+    for (let attempt = 0; attempt < MAX_NETWORK_RETRIES; attempt += 1) {
+      try {
+        return await base44.functions.invoke('databaseRestoreBatch', {
+          session_id: sessionId,
+        });
+      } catch (error) {
+        lastError = error;
+        if (!isTransientNetworkError(error)) throw error;
+        if (attempt >= MAX_NETWORK_RETRIES - 1) break;
+
+        const delay = NETWORK_RETRY_DELAYS[attempt];
+        setRestoreProgress((current) => ({
+          ...(current || {}),
+          status: 'RETRYING',
+          message: `Koneksi terputus. Mencoba kembali ${attempt + 1}/${MAX_NETWORK_RETRIES - 1} dalam ${Math.ceil(delay / 1000)} detik...`,
+        }));
+        await wait(delay);
+      }
+    }
+
+    lastError.recoverable = true;
+    throw lastError;
+  };
+
+  const mapBatchProgress = (progress, sessionMeta = {}) => ({
+    status: progress.status || 'RUNNING',
+    phase: progress.phase || 'RESTORE',
+    percent: Number(progress.progress_percent || 0),
+    operation: progress.operation || '',
+    entity: progress.current_entity || progress.completed_entity || '',
+    fields: Array.isArray(progress.current_fields) ? progress.current_fields : [],
+    strategy: progress.strategy || '',
+    batch: Number(progress.batch || 0),
+    totalBatches: Number(progress.total_batches || 0),
+    batchFrom: Number(progress.batch_from || 0),
+    batchTo: Number(progress.batch_to || 0),
+    batchWritten: Number(progress.batch_written || 0),
+    entityProcessed: Number(progress.entity_processed || progress.current_offset || 0),
+    entityRecords: Number(progress.entity_records || 0),
+    totalProcessed: Number(progress.total_processed || 0),
+    totalRecords: Number(progress.total_records || sessionMeta.totalRecords || 0),
+    deleteCompleted: Number(progress.delete_completed || 0),
+    deleteTotal: Number(progress.delete_total || 0),
+    sessionCode: progress.session_code || sessionMeta.sessionCode || '',
+    backupCode: progress.backup_code || sessionMeta.backupCode || '',
+    message: progress.message || (
+      progress.phase === 'DELETE'
+        ? `Menghapus data lama ${progress.current_entity || ''}...`
+        : progress.phase === 'VERIFY'
+          ? 'Memverifikasi hasil restore...'
+          : progress.phase === 'COMPLETED'
+            ? 'Restore selesai 100%.'
+            : `Menulis ${progress.current_entity || 'data'}...`
+    ),
+  });
+
+  const runRestoreSession = async (sessionMeta) => {
+    const sessionId = sessionMeta?.id;
+    if (!sessionId) return;
+
+    setBusy(true);
+    setRestoreRunning(true);
+    setRestoreProgress((current) => ({
+      ...(current || {}),
+      status: 'RUNNING',
+      phase: current?.phase || 'RESTORE',
+      entity: current?.entity || sessionMeta.current_entity || '',
+      entityProcessed: Number(current?.entityProcessed || sessionMeta.current_offset || 0),
+      totalRecords: Number(current?.totalRecords || sessionMeta.total_records || sessionMeta.totalRecords || 0),
+      sessionCode: sessionMeta.session_code || sessionMeta.sessionCode || '',
+      backupCode: sessionMeta.backup_code || sessionMeta.backupCode || '',
+      message: 'Melanjutkan restore dari checkpoint terakhir...',
+    }));
+
+    try {
+      let done = false;
+      let safetyCounter = 0;
+
+      while (!done) {
+        safetyCounter += 1;
+        if (safetyCounter > 20000) {
+          throw new Error('Restore dihentikan karena jumlah batch melebihi batas keamanan.');
+        }
+
+        const batchRes = await invokeRestoreBatchWithRetry(sessionId);
+        const progress = batchRes?.data || {};
+
+        if (progress.status === 'FAILED' || progress.ok === false) {
+          const restoreError = new Error(
+            progress.error || `Restore gagal pada ${progress.error_entity || 'entity tidak diketahui'}`
+          );
+          restoreError.restoreData = progress;
+          throw restoreError;
+        }
+
+        setRestoreProgress(mapBatchProgress(progress, sessionMeta));
+        done = progress.done === true || progress.status === 'COMPLETED';
+        if (!done) await wait(150);
+      }
+
+      localStorage.removeItem(ACTIVE_RESTORE_STORAGE_KEY);
+      setResumableSession(null);
+      setRestoreProgress((current) => ({
+        ...current,
+        status: 'COMPLETED',
+        phase: 'COMPLETED',
+        percent: 100,
+        message: 'Restore selesai dan terverifikasi 100%.',
+      }));
+      toast({ title: 'Restore dari file selesai', description: '100% verified' });
+      await wait(800);
+      setFileOpen(false);
+      resetFileState();
+      loadBackups();
+    } catch (error) {
+      const errorData = error?.response?.data || error?.restoreData || {};
+      const errorMessage = errorData.error || error?.message || 'Restore gagal';
+      const recoverable = error?.recoverable || isTransientNetworkError(error);
+
+      setRestoreProgress((current) => ({
+        ...(current || {}),
+        status: recoverable ? 'PAUSED' : 'FAILED',
+        phase: current?.phase || 'RESTORE',
+        message: recoverable
+          ? 'Koneksi terputus setelah beberapa percobaan. Restore dapat dilanjutkan dari checkpoint terakhir.'
+          : errorMessage,
+        errorEntity: errorData.error_entity || current?.entity || '',
+        errorOffset: Number(errorData.error_offset ?? current?.entityProcessed ?? 0),
+        errorFields: Array.isArray(errorData.error_fields) ? errorData.error_fields : [],
+      }));
+
+      if (recoverable) {
+        setResumableSession(sessionMeta);
+        toast({
+          variant: 'destructive',
+          title: 'Koneksi terputus',
+          description: 'Checkpoint aman. Klik Lanjutkan Restore untuk mencoba lagi.',
+        });
+      } else {
+        localStorage.removeItem(ACTIVE_RESTORE_STORAGE_KEY);
+        toast({ variant: 'destructive', title: 'Restore berhenti', description: errorMessage });
+      }
+    } finally {
+      setBusy(false);
+      setRestoreRunning(false);
+    }
+  };
+
   const doFileRestore = async () => {
   if (!uploadedFile) {
     toast({
@@ -349,6 +562,24 @@ export default function DatabaseManagement() {
     const sessionId =
       prepare.session_id;
 
+    const activeSession = {
+      id: sessionId,
+      session_code: prepare.session_code || '',
+      backup_code: prepare.backup_code || '',
+      file_name: uploadedFile.file_name,
+      total_records: Number(prepare.total_records || 0),
+      status: prepare.status || 'READY',
+    };
+
+    setResumableSession(activeSession);
+    localStorage.setItem(ACTIVE_RESTORE_STORAGE_KEY, JSON.stringify({
+      id: sessionId,
+      sessionCode: prepare.session_code || '',
+      backupCode: prepare.backup_code || '',
+      fileName: uploadedFile.file_name,
+      totalRecords: Number(prepare.total_records || 0),
+    }));
+
     setRestoreProgress({
       status:
         prepare.status || 'READY',
@@ -438,12 +669,8 @@ export default function DatabaseManagement() {
       }
 
       const batchRes =
-        await base44.functions.invoke(
-          'databaseRestoreBatch',
-          {
-            session_id:
-              sessionId,
-          }
+        await invokeRestoreBatchWithRetry(
+          sessionId
         );
 
       const progress =
@@ -608,6 +835,9 @@ export default function DatabaseManagement() {
         'Restore selesai dan terverifikasi 100%.',
     }));
 
+    localStorage.removeItem(ACTIVE_RESTORE_STORAGE_KEY);
+    setResumableSession(null);
+
     toast({
       title:
         'Restore dari file selesai',
@@ -641,14 +871,17 @@ export default function DatabaseManagement() {
 
     const errorData = e?.response?.data || e?.restoreData || {};
     const errorMessage = errorData.error || e?.message || 'Restore gagal';
+    const recoverable = e?.recoverable || isTransientNetworkError(e);
 
     setRestoreProgress(current => ({
       ...(current || {}),
-      status: 'FAILED',
+      status: recoverable ? 'PAUSED' : 'FAILED',
       phase: current?.phase || 'RESTORE',
-      message: errorMessage,
+      message: recoverable
+        ? 'Koneksi terputus setelah beberapa percobaan. Restore dapat dilanjutkan dari checkpoint terakhir.'
+        : errorMessage,
       errorEntity: errorData.error_entity || current?.entity || '',
-      errorOffset: Number(errorData.error_offset || 0),
+      errorOffset: Number(errorData.error_offset ?? current?.entityProcessed ?? 0),
       errorFields: Array.isArray(errorData.error_fields) ? errorData.error_fields : [],
     }));
 
@@ -657,7 +890,7 @@ export default function DatabaseManagement() {
         'destructive',
 
       title:
-        'Restore berhenti',
+        recoverable ? 'Koneksi terputus' : 'Restore berhenti',
 
       description: errorData.error_entity
         ? `${errorData.error_entity} · ${errorMessage}`
@@ -779,6 +1012,25 @@ export default function DatabaseManagement() {
         setFileOpen(false); resetFileState();
       }} title="Restore dari Backup File">
         <div className="space-y-4">
+          {resumableSession && !restoreRunning && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <div className="font-semibold">Restore belum selesai ditemukan</div>
+              <div className="mt-1 text-xs">
+                {resumableSession.session_code || 'Restore session'}
+                {' · '}{resumableSession.current_entity || 'checkpoint tersimpan'}
+                {Number.isFinite(Number(resumableSession.current_offset))
+                  ? ` · offset ${Number(resumableSession.current_offset)}`
+                  : ''}
+              </div>
+              <Button
+                className="mt-3"
+                onClick={() => runRestoreSession(resumableSession)}
+                disabled={busy || resumeChecking}
+              >
+                {resumeChecking ? 'Memeriksa session...' : 'Lanjutkan Restore'}
+              </Button>
+            </div>
+          )}
           <div><Label>File backup JSON</Label><Input ref={fileInputRef} type="file" accept=".json,application/json" onChange={onPickFile} disabled={busy || restoreRunning} /></div>
           {uploadedFile && <div className="rounded-md border p-3 text-sm"><div className="font-medium">{uploadedFile.file_name}</div><div className="text-xs text-slate-500">{fmtSize(uploadedFile.file_size)}</div></div>}
           {needsPassword && <div className="space-y-2"><Label>Password file</Label><div className="flex gap-2"><Input type="password" value={filePassword} onChange={(e) => setFilePassword(e.target.value)} disabled={restoreRunning} /><Button variant="outline" onClick={revalidateWithPassword} disabled={busy || restoreRunning}>Validasi</Button></div></div>}
@@ -793,10 +1045,11 @@ export default function DatabaseManagement() {
               {restoreProgress.entity && <div className="grid grid-cols-2 gap-2 text-xs"><div><span className="text-slate-500">Entity</span><div className="font-mono font-medium">{restoreProgress.entity}</div></div><div><span className="text-slate-500">Batch</span><div>{restoreProgress.batch || 0} / {restoreProgress.totalBatches || 0}</div></div><div><span className="text-slate-500">Entity record</span><div>{restoreProgress.entityProcessed || 0} / {restoreProgress.entityRecords || 0}</div></div><div><span className="text-slate-500">Total record</span><div>{restoreProgress.totalProcessed || 0} / {restoreProgress.totalRecords || 0}</div></div></div>}
               {Array.isArray(restoreProgress.fields) && restoreProgress.fields.length > 0 && <div><div className="text-xs text-slate-500 mb-1">Field yang ditulis</div><div className="flex flex-wrap gap-1">{restoreProgress.fields.map((field) => <span key={field} className="px-1.5 py-0.5 rounded bg-slate-100 font-mono text-[10px]">{field}</span>)}</div></div>}
               {restoreProgress.status === 'FAILED' && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-[11px] text-red-700"><div className="flex items-start gap-2"><AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /><div className="min-w-0"><div className="font-semibold">Restore berhenti</div><div className="mt-1">{restoreProgress.message || 'Restore berhenti karena error.'}</div></div></div>{restoreProgress.errorEntity && <div className="mt-3 pt-2 border-t border-red-200 space-y-1"><div><span className="font-medium">Entity:</span>{' '}<span className="font-mono">{restoreProgress.errorEntity}</span></div><div><span className="font-medium">Record / Offset:</span>{' '}{Number(restoreProgress.errorOffset || 0) + 1}</div>{Array.isArray(restoreProgress.errorFields) && restoreProgress.errorFields.length > 0 && <div><div className="font-medium mb-1">Field record:</div><div className="flex flex-wrap gap-1">{restoreProgress.errorFields.map((field) => <span key={field} className="px-1.5 py-0.5 rounded bg-red-100 font-mono text-[10px]">{field}</span>)}</div></div>}</div>}</div>}
+              {restoreProgress.status === 'PAUSED' && <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-[11px] text-amber-800"><div className="font-semibold">Koneksi terputus — checkpoint tetap aman</div><div className="mt-1">{restoreProgress.message}</div></div>}
             </div>
           )}
 
-          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => { if (!restoreRunning) { setFileOpen(false); resetFileState(); } }} disabled={restoreRunning}>Batal</Button><Button onClick={doFileRestore} disabled={busy || restoreRunning || !preview}>{restoreRunning ? 'Restore berjalan...' : busy ? 'Memproses...' : 'Mulai Restore'}</Button></div>
+          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => { if (!restoreRunning) { setFileOpen(false); resetFileState(); } }} disabled={restoreRunning}>Batal</Button><Button onClick={doFileRestore} disabled={busy || restoreRunning || !preview || !!resumableSession}>{restoreRunning ? 'Restore berjalan...' : busy ? 'Memproses...' : 'Mulai Restore'}</Button></div>
         </div>
       </FormModal>
     </div>
