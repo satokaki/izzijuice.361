@@ -177,10 +177,12 @@ export default function DatabaseManagement() {
         ['READY', 'RUNNING', 'PAUSED', 'VERIFYING'].includes(row.status)
       );
 
-      const active =
-        activeRows.find((row) => row.id === stored?.id) ||
-        activeRows[0] ||
-        null;
+      // Resume only the session explicitly owned by this browser.
+      // Falling back to activeRows[0] can resurrect a stale or unrelated
+      // server-side session after the completed session was cleared locally.
+      const active = stored?.id
+        ? activeRows.find((row) => row.id === stored.id) || null
+        : null;
 
       setResumableSession(active);
 
