@@ -181,7 +181,7 @@ export default function Dashboard() {
       ) {
         requests.materials =
           base44.entities.Material
-            .list()
+            .filter({ is_active: true })
             .catch(() => []);
       }
 
@@ -347,10 +347,10 @@ export default function Dashboard() {
       /*
        * LOW STOCK KPI SOURCE OF TRUTH
        *
-       * Jumlahkan stok aktual seluruh StockBalance per bahan.
-       * Material tanpa balance dianggap memiliki stok 0.
+       * Gunakan dataset StockBalance yang sama dengan Kartu Stok,
+       * lalu jumlahkan stok tersedia per bahan.
        */
-      const materialStockById =
+      const availableMaterialStockById =
         operationalBalances.reduce(
           (stockById, balance) => {
             if (
@@ -360,10 +360,16 @@ export default function Dashboard() {
               return stockById;
             }
 
+            const availableStock = Number(
+              balance.available_quantity ??
+              balance.quantity ??
+              0
+            ) || 0;
+
             stockById.set(
               balance.item_id,
               (stockById.get(balance.item_id) || 0) +
-                (Number(balance.quantity) || 0)
+                availableStock
             );
 
             return stockById;
@@ -385,15 +391,16 @@ export default function Dashboard() {
           access.stockCard
             ? materials.filter(material => {
                 const minimumStock =
-                  Number(material.minimum_stock) || 0;
+                  Number(material.min_stock) || 0;
 
-                const actualStock =
-                  materialStockById.get(material.id) || 0;
+                const availableStock =
+                  availableMaterialStockById.get(
+                    material.id
+                  ) || 0;
 
                 return (
-                  material.is_active &&
                   minimumStock > 0 &&
-                  actualStock < minimumStock
+                  availableStock < minimumStock
                 );
               }).length
             : 0,
