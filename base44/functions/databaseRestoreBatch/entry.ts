@@ -31,6 +31,7 @@ import {
 
 const MAX_BATCH_SIZE = 50;
 const DEFAULT_BATCH_SIZE = 10;
+const DELETE_BATCH_SIZE = 10;
 const MAX_RETRIES = 5;
 
 /* ==========================================================
@@ -602,6 +603,18 @@ async function processDeletePhase({
     };
   }
 
+  const continuingEntity =
+    session.current_entity ===
+    nextEntity;
+
+  const previouslyDeleted =
+    continuingEntity
+      ? Number(
+          session.entity_processed ||
+          0
+        )
+      : 0;
+
   session =
     await updateSession(
       base44,
@@ -612,6 +625,12 @@ async function processDeletePhase({
 
         current_entity:
           nextEntity,
+
+        current_offset:
+          previouslyDeleted,
+
+        entity_processed:
+          previouslyDeleted,
 
         error_entity:
           '',
@@ -624,14 +643,133 @@ async function processDeletePhase({
       }
     );
 
-  await retryOperation(
-    () =>
-      entities[
-        nextEntity
-      ].deleteMany({}),
+  /*
+   * Jangan gunakan deleteMany({}) di sini. Pada entity besar,
+   * satu request dapat membuat origin timeout sebelum Cloudflare
+   * menerima response. Ambil halaman kecil dan hapus satu per satu;
+   * invocation berikutnya akan mengambil halaman pertama yang tersisa.
+   */
+  const rows =
+    await retryOperation(
+      () =>
+        entities[
+          nextEntity
+        ].list(
+          '-created_date',
+          DELETE_BATCH_SIZE
+        ),
 
-    `Delete ${nextEntity}`
-  );
+      `List delete batch ${nextEntity}`
+    );
+
+  if (
+    Array.isArray(rows) &&
+    rows.length > 0
+  ) {
+    let deletedInBatch = 0;
+
+    for (const row of rows) {
+      if (!row?.id) {
+        continue;
+      }
+
+      try {
+        await retryOperation(
+          () =>
+            entities[
+              nextEntity
+            ].delete(row.id),
+
+          `Delete ${nextEntity} ${
+            row.id
+          }`
+        );
+
+        deletedInBatch += 1;
+      } catch (error) {
+        error.entity =
+          nextEntity;
+
+        error.offset =
+          previouslyDeleted +
+          deletedInBatch;
+
+        throw error;
+      }
+    }
+
+    const deletedTotal =
+      previouslyDeleted +
+      deletedInBatch;
+
+    session =
+      await updateSession(
+        base44,
+        session,
+        {
+          current_offset:
+            deletedTotal,
+
+          entity_processed:
+            deletedTotal,
+        }
+      );
+
+    return {
+      ok: true,
+
+      session_id:
+        session.id,
+
+      session_code:
+        session.session_code,
+
+      status:
+        'RUNNING',
+
+      phase:
+        'DELETE',
+
+      operation:
+        'DELETE',
+
+      current_entity:
+        nextEntity,
+
+      current_offset:
+        deletedTotal,
+
+      entity_processed:
+        deletedTotal,
+
+      batch_written:
+        deletedInBatch,
+
+      message:
+        `${deletedTotal} record lama ${nextEntity} berhasil dihapus...`,
+
+      delete_completed:
+        state.deleted.length,
+
+      delete_total:
+        deletePlan.length,
+
+      progress_percent:
+        deletePlan.length
+          ? Number(
+              (
+                (
+                  state.deleted.length /
+                  deletePlan.length
+                ) *
+                5
+              ).toFixed(2)
+            )
+          : 5,
+
+      done: false,
+    };
+  }
 
   const nextState = {
     ...state,
@@ -654,6 +792,12 @@ async function processDeletePhase({
           JSON.stringify(
             nextState
           ),
+
+        current_offset:
+          0,
+
+        entity_processed:
+          0,
       }
     );
 
