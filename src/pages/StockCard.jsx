@@ -99,6 +99,61 @@ const makeOpeningNumber = () => {
   const d = new Date();
   return `OPEN-${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
 };
+
+const ledgerDate = row => row?.transaction_date || row?.created_date || '';
+
+const sortLedgerAscending = (a, b) => {
+  const byDate = ledgerDate(a).localeCompare(ledgerDate(b));
+  if (byDate !== 0) return byDate;
+  return (a?.created_date || a?.id || '').localeCompare(b?.created_date || b?.id || '');
+};
+
+const sortLedgerDescending = (a, b) => sortLedgerAscending(b, a);
+
+const loadStockLedgerHistory = async () => {
+  const pageSize = 500;
+  const maxPages = 20; // Safety cap: at most 10,000 ledger rows in the browser.
+  const rows = [];
+  const seen = new Set();
+
+  const loadBy = async orderBy => {
+    for (let page = 0; page < maxPages; page += 1) {
+      const batch = await base44.entities.StockLedger.list(orderBy, pageSize, page * pageSize);
+      if (!Array.isArray(batch) || batch.length === 0) break;
+
+      let added = 0;
+      batch.forEach((row, index) => {
+        const key = row.id || [
+          row.transaction_number,
+          row.item_id,
+          row.inventory_status,
+          row.transaction_date,
+          row.created_date,
+          page,
+          index,
+        ].join('|');
+        if (seen.has(key)) return;
+        seen.add(key);
+        rows.push(row);
+        added += 1;
+      });
+
+      if (batch.length < pageSize || added === 0) break;
+    }
+  };
+
+  try {
+    await loadBy('-transaction_date');
+  } catch {
+    // Compatibility fallback for deployments where transaction_date cannot be
+    // used as a server-side ordering field.
+    rows.length = 0;
+    seen.clear();
+    await loadBy('-created_date');
+  }
+
+  return rows.sort(sortLedgerDescending);
+};
 export default function StockCard() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -131,7 +186,7 @@ export default function StockCard() {
     setLoading(true);
     try {
       const [items, bals, whs, mats, prods, ctx] = await Promise.all([
-        base44.entities.StockLedger.list('-created_date', 500),
+        loadStockLedgerHistory(),
         base44.entities.StockBalance.list('-updated_date', 2000),
         base44.entities.Warehouse.filter({ is_active: true }).catch(() => []),
         base44.entities.Material.filter({ is_active: true }).catch(() => []),
@@ -379,11 +434,7 @@ export default function StockCard() {
       if (filters.date_to && item.transaction_date?.slice(0, 10) > filters.date_to) return false;
       return true;
     });
-    const sorted = [...rows].sort((a, b) => {
-      const da = a.transaction_date || a.created_date || '';
-      const db = b.transaction_date || b.created_date || '';
-      return da.localeCompare(db);
-    });
+    const sorted = [...rows].sort(sortLedgerAscending);
     const running = {};
     const result = sorted.map(r => {
       const key = `${r.item_id}|${r.inventory_status || ''}`;
@@ -392,7 +443,7 @@ export default function StockCard() {
       const unitCost = resolveBalanceUnitCost(r, { materialById, stageCostIndex });
       return { ...r, running_balance: running[key], unit_cost: unitCost, nominal: delta * unitCost };
     });
-    return result.sort((a, b) => (b.created_date || '').localeCompare(a.created_date || ''));
+    return result.sort(sortLedgerDescending);
   }, [data, filters, materialById, stageCostIndex]);
   /* =========================================================
      EXPORT — SECURITY PATCH v3.6.1
