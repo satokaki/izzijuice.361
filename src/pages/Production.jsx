@@ -9,7 +9,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Pencil, Play, CheckCircle, AlertTriangle, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { Plus, Play, CheckCircle, AlertTriangle, RefreshCw, RotateCcw, X } from 'lucide-react';
 import { calculateRecipe } from '@/lib/recipeCalculator';
 import { calculatePremixQuantities } from '@/lib/premix';
 import { generateProductionNumber, generateBatchNumber } from '@/lib/sequence';
@@ -983,12 +983,26 @@ export default function Production() {
       return;
     }
 
+    const isPremixProduction =
+      editing.production_type === 'PREMIX';
+
+    if (
+      (isPremixProduction && !editing.output_material_id) ||
+      (!isPremixProduction && !editing.product_id)
+    ) {
+      toast({
+        variant: 'destructive',
+        title: 'Produk output belum ditentukan',
+        description: isPremixProduction
+          ? 'Pilih bahan hasil premix sebelum posting. Stok bahan belum dikurangi.'
+          : 'Pilih produk hasil produksi sebelum posting. Stok bahan belum dikurangi.'
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      const isPremixProduction =
-        editing.production_type === 'PREMIX';
-
       const consumeType =
         isPremixProduction
           ? 'premix_consumption'
@@ -1459,11 +1473,11 @@ export default function Production() {
         );
 
       if (
-        consumptionRows.length === 0 ||
+        consumptionRows.length === 0 &&
         outputRows.length === 0
       ) {
         throw new Error(
-          'Ledger produksi tidak lengkap. VOID dihentikan untuk mencegah saldo salah.'
+          'Tidak ada transaksi produksi yang dapat di-rollback.'
         );
       }
 
@@ -1658,8 +1672,9 @@ export default function Production() {
 
       toast({
         title: 'VOID Production berhasil',
-        description:
-          `${item.production_number} · output ditarik dan stok bahan dikembalikan`
+        description: outputRows.length > 0
+          ? `${item.production_number} · output ditarik dan stok bahan dikembalikan`
+          : `${item.production_number} · stok bahan dari produksi parsial dikembalikan`
       });
 
       await loadData();
