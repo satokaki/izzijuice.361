@@ -25,7 +25,7 @@ const FLOW = [
   { key: 'production_output', label: 'Produksi', stage: 'BULK', icon: Factory },
   { key: 'bottling_output', label: 'Bottling', stage: 'READY_FOR_LABELING', icon: PackageCheck },
   { key: 'labeling_output', label: 'Labeling', stage: 'UNEXCISED', icon: Tags },
-  { key: 'excise_output', label: 'Excise', stage: 'READY_FOR_SALE', icon: Stamp },
+  { key: 'excise_output', label: 'Cukai', stage: 'READY_FOR_SALE', icon: Stamp },
 ];
 
 const localDate = (date) => {
@@ -46,9 +46,12 @@ export default function StockCardDedicated() {
   const { toast } = useToast();
   const today = new Date();
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [mode, setMode] = useState('product');
+  const [mode, setMode] = useState('batch');
   const [products, setProducts] = useState([]);
   const [recipes, setRecipes] = useState([]);
+  const [productionOrders, setProductionOrders] = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [componentMappings, setComponentMappings] = useState([]);
   const [ledger, setLedger] = useState([]);
   const [balances, setBalances] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -59,17 +62,23 @@ export default function StockCardDedicated() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [productRows, recipeRows, ledgerRows, balanceRows] = await Promise.all([
+      const [productRows, recipeRows, productionRows, materialRows, mappingRows, ledgerRows, balanceRows] = await Promise.all([
         base44.entities.Product.filter({ is_active: true }),
         base44.entities.Recipe.filter({ status: 'approved' }).catch(() => []),
+        base44.entities.ProductionOrder.list('-production_date', 2000),
+        base44.entities.Material.filter({ is_active: true }),
+        base44.entities.ProductComponentMapping.filter({ is_active: true }).catch(() => []),
         base44.entities.StockLedger.list('-transaction_date', 5000),
         base44.entities.StockBalance.list('-updated_date', 3000),
       ]);
       setProducts(productRows || []);
       setRecipes(recipeRows || []);
+      setProductionOrders(productionRows || []);
+      setMaterials(materialRows || []);
+      setComponentMappings(mappingRows || []);
       setLedger(ledgerRows || []);
       setBalances(balanceRows || []);
-      if (!selectedId && productRows?.length) setSelectedId(productRows[0].id);
+      if (!selectedId && productionRows?.length) setSelectedId(productionRows[0].id);
     } catch (error) {
       toast({ variant: 'destructive', title: 'Gagal memuat stock card', description: error?.message });
     } finally { setLoading(false); }
@@ -77,57 +86,76 @@ export default function StockCardDedicated() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const selectedRecipe = mode === 'recipe' ? recipes.find(r => r.id === selectedId) : null;
-  const productId = mode === 'recipe' ? selectedRecipe?.product_id : selectedId;
+  const boxIds = useMemo(() => new Set(componentMappings.filter(m => m.component_type === 'box').map(m => m.material_id)), [componentMappings]);
+  const labelIds = useMemo(() => new Set(componentMappings.filter(m => m.component_type === 'label').map(m => m.material_id)), [componentMappings]);
+  const modeItems = useMemo(() => {
+    if (mode === 'batch') return productionOrders;
+    if (mode === 'essence') return materials.filter(m => m.material_category === 'flavor');
+    if (mode === 'box') return materials.filter(m => boxIds.has(m.id) || (m.material_type === 'PACKAGING' && /box|dus|karton/i.test(`${m.name} ${m.category_name || ''}`)));
+    return materials.filter(m => labelIds.has(m.id) || ['LABEL', 'STICKER'].includes(m.material_type));
+  }, [mode, productionOrders, materials, boxIds, labelIds]);
+  const selectedBatch = mode === 'batch' ? productionOrders.find(row => row.id === selectedId) : null;
+  const selectedMaterial = mode !== 'batch' ? materials.find(row => row.id === selectedId) : null;
+  const productId = selectedBatch?.product_id;
   const product = products.find(p => p.id === productId);
-  const selectedRecipeForProduct = selectedRecipe || recipes.find(r => r.product_id === productId && r.status === 'approved');
+  const selectedRecipeForProduct = recipes.find(r => r.id === selectedBatch?.recipe_id) || recipes.find(r => r.product_id === productId && r.status === 'approved');
+  const selectedItem = mode === 'batch' ? product : selectedMaterial;
+  const selectedUnit = unitLabel(mode === 'batch' ? product?.unit : selectedMaterial?.unit);
 
   const rows = useMemo(() => ledger
-    .filter(row => row.item_type === 'product' && row.item_id === productId)
+    .filter(row => mode === 'batch'
+      ? row.item_type === 'product' && row.item_id === productId && (!selectedBatch?.batch_number || row.batch_number === selectedBatch.batch_number)
+      : row.item_type === 'material' && row.item_id === selectedId)
     .filter(row => {
       const day = (row.transaction_date || row.created_date || '').slice(0, 10);
       return (!dateFrom || day >= dateFrom) && (!dateTo || day <= dateTo);
     })
     .sort((a, b) => String(b.transaction_date || b.created_date).localeCompare(String(a.transaction_date || a.created_date))),
-  [ledger, productId, dateFrom, dateTo]);
+  [ledger, mode, productId, selectedId, selectedBatch?.batch_number, dateFrom, dateTo]);
 
-  const productBalances = useMemo(() => balances.filter(b => b.item_type === 'product' && b.item_id === productId), [balances, productId]);
-  const warehouseStock = useMemo(() => Object.values(productBalances.reduce((acc, b) => {
+  const selectedBalances = useMemo(() => balances.filter(b => mode === 'batch'
+    ? b.item_type === 'product' && b.item_id === productId && (!selectedBatch?.batch_number || b.batch_number === selectedBatch.batch_number)
+    : b.item_type === 'material' && b.item_id === selectedId), [balances, mode, productId, selectedId, selectedBatch?.batch_number]);
+  const warehouseStock = useMemo(() => Object.values(selectedBalances.reduce((acc, b) => {
     const key = b.warehouse_id || b.warehouse_name || 'unknown';
     if (!acc[key]) acc[key] = { id: key, name: b.warehouse_name || 'Gudang tidak diketahui', quantity: 0, units: new Set() };
     acc[key].quantity += Number(b.available_quantity ?? b.quantity ?? 0);
-    acc[key].units.add(b.inventory_status === 'BULK' ? 'ml' : unitLabel(b.unit || product?.unit));
+    acc[key].units.add(b.inventory_status === 'BULK' ? 'ml' : unitLabel(b.unit || selectedUnit));
     return acc;
-  }, {})).map(row => ({ ...row, unit: row.units.size === 1 ? [...row.units][0] : 'campuran' })).sort((a, b) => b.quantity - a.quantity), [productBalances, product?.unit]);
+  }, {})).map(row => ({ ...row, unit: row.units.size === 1 ? [...row.units][0] : 'campuran' })).sort((a, b) => b.quantity - a.quantity), [selectedBalances, selectedUnit]);
 
   const totalIn = rows.reduce((sum, row) => sum + Number(row.quantity_in || 0), 0);
   const totalOut = rows.reduce((sum, row) => sum + Number(row.quantity_out || 0), 0);
-  const available = productBalances.filter(b => b.inventory_status === 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
-  const inProcess = productBalances.filter(b => b.inventory_status && b.inventory_status !== 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
-  const inProcessUnits = new Set(productBalances.filter(b => b.inventory_status && b.inventory_status !== 'READY_FOR_SALE' && Number(b.available_quantity ?? b.quantity ?? 0) !== 0).map(b => b.inventory_status === 'BULK' ? 'ml' : unitLabel(b.unit || product?.unit)));
-  const inProcessUnit = inProcessUnits.size === 1 ? [...inProcessUnits][0] : (inProcessUnits.size > 1 ? 'campuran' : unitLabel(product?.unit));
-  const incomingUnits = new Set(rows.filter(r => Number(r.quantity_in || 0) !== 0).map(r => movementUnit(r, product?.unit)));
-  const outgoingUnits = new Set(rows.filter(r => Number(r.quantity_out || 0) !== 0).map(r => movementUnit(r, product?.unit)));
-  const totalInUnit = incomingUnits.size === 1 ? [...incomingUnits][0] : (incomingUnits.size > 1 ? 'campuran' : unitLabel(product?.unit));
-  const totalOutUnit = outgoingUnits.size === 1 ? [...outgoingUnits][0] : (outgoingUnits.size > 1 ? 'campuran' : unitLabel(product?.unit));
+  const available = mode === 'batch' ? selectedBalances.filter(b => b.inventory_status === 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0) : selectedBalances.reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
+  const inProcess = mode === 'batch' ? selectedBalances.filter(b => b.inventory_status && b.inventory_status !== 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0) : 0;
+  const inProcessUnits = new Set(selectedBalances.filter(b => b.inventory_status && b.inventory_status !== 'READY_FOR_SALE' && Number(b.available_quantity ?? b.quantity ?? 0) !== 0).map(b => b.inventory_status === 'BULK' ? 'ml' : unitLabel(b.unit || selectedUnit)));
+  const inProcessUnit = inProcessUnits.size === 1 ? [...inProcessUnits][0] : (inProcessUnits.size > 1 ? 'campuran' : selectedUnit);
+  const incomingUnits = new Set(rows.filter(r => Number(r.quantity_in || 0) !== 0).map(r => movementUnit(r, selectedUnit)));
+  const outgoingUnits = new Set(rows.filter(r => Number(r.quantity_out || 0) !== 0).map(r => movementUnit(r, selectedUnit)));
+  const totalInUnit = incomingUnits.size === 1 ? [...incomingUnits][0] : (incomingUnits.size > 1 ? 'campuran' : selectedUnit);
+  const totalOutUnit = outgoingUnits.size === 1 ? [...outgoingUnits][0] : (outgoingUnits.size > 1 ? 'campuran' : selectedUnit);
   const opening = rows.length ? Number(rows[rows.length - 1].balance_quantity || 0) - Number(rows[rows.length - 1].quantity_in || 0) + Number(rows[rows.length - 1].quantity_out || 0) : 0;
 
   const flow = FLOW.map(step => {
     const event = rows.find(row => row.transaction_type === step.key);
-    const stageQty = productBalances.filter(b => b.inventory_status === step.stage).reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
+    const stageQty = selectedBalances.filter(b => b.inventory_status === step.stage).reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
     return { ...step, event, quantity: event ? Number(event.quantity_in || 0) : stageQty, unit: step.stage === 'BULK' ? 'ml' : unitLabel(event?.unit || product?.unit) };
   });
 
   const switchMode = value => {
     setMode(value);
-    setSelectedId(value === 'product' ? (products[0]?.id || '') : (recipes[0]?.id || ''));
+    const items = value === 'batch' ? productionOrders : value === 'essence'
+      ? materials.filter(m => m.material_category === 'flavor')
+      : value === 'box' ? materials.filter(m => boxIds.has(m.id) || (m.material_type === 'PACKAGING' && /box|dus|karton/i.test(`${m.name} ${m.category_name || ''}`)))
+      : materials.filter(m => labelIds.has(m.id) || ['LABEL', 'STICKER'].includes(m.material_type));
+    setSelectedId(items[0]?.id || '');
   };
 
   const exportRows = rows.map(row => ({
     date: localDate(row.transaction_date || row.created_date), number: row.transaction_number || '',
     type: TYPE_LABEL[row.transaction_type] || row.transaction_type, warehouse: row.warehouse_name || '',
     batch: row.batch_number || '', in: row.quantity_in || 0, out: row.quantity_out || 0,
-    balance: row.balance_quantity ?? '', unit: movementUnit(row, product?.unit), notes: row.notes || '',
+    balance: row.balance_quantity ?? '', unit: movementUnit(row, selectedUnit), notes: row.notes || '',
   }));
 
   const exportCSV = () => {
@@ -135,10 +163,10 @@ export default function StockCardDedicated() {
     const body = exportRows.map(r => Object.values(r).map(csvCell).join(','));
     const blob = new Blob(['\ufeff' + [headers.map(csvCell).join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url;
-    link.download = `stock-card-${product?.sku || product?.code || 'produk'}-${dateFrom}-${dateTo}.csv`; link.click(); URL.revokeObjectURL(url);
+    link.download = `stock-card-${selectedItem?.code || selectedBatch?.batch_number || 'item'}-${dateFrom}-${dateTo}.csv`; link.click(); URL.revokeObjectURL(url);
   };
   const exportPDF = () => exportReportToPDF({
-    title: 'Stock Card Dedicated', subtitle: product?.name || 'Produk belum dipilih', fileName: `stock-card-${product?.sku || product?.code || 'produk'}.pdf`,
+    title: 'Stock Card Dedicated', subtitle: mode === 'batch' ? `${selectedBatch?.batch_number || 'Batch belum dipilih'} · ${product?.name || ''}` : (selectedMaterial?.name || 'Bahan belum dipilih'), fileName: `stock-card-${selectedItem?.code || selectedBatch?.batch_number || 'item'}.pdf`,
     meta: { period: `${dateFrom} s/d ${dateTo}` }, rows: exportRows,
     columns: [
       { key: 'date', header: 'Tanggal', width: 80 }, { key: 'number', header: 'No. Transaksi', width: 105 },
@@ -157,26 +185,28 @@ export default function StockCardDedicated() {
     { key: 'quantity_in', header: 'Masuk', render: r => r.quantity_in ? <span className="font-semibold text-emerald-600">{qty(r.quantity_in)}</span> : '—' },
     { key: 'quantity_out', header: 'Keluar', render: r => r.quantity_out ? <span className="font-semibold text-red-500">{qty(r.quantity_out)}</span> : '—' },
     { key: 'balance_quantity', header: 'Saldo', render: r => <span className="font-semibold">{qty(r.balance_quantity)}</span> },
-    { key: 'unit', header: 'Satuan', render: r => movementUnit(r, product?.unit) }, { key: 'notes', header: 'Keterangan' },
+    { key: 'unit', header: 'Satuan', render: r => movementUnit(r, selectedUnit) }, { key: 'notes', header: 'Keterangan' },
   ];
 
   return <div className="mx-auto max-w-[1500px] space-y-4 p-5">
-    <PageHeader title="Stock Card Dedicated" description="Lihat pergerakan stok secara detail berdasarkan produk atau recipe" actions={<div className="flex flex-wrap items-center gap-2"><div className="flex items-center gap-2 rounded-md border bg-white px-2 py-1"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/><span className="text-muted-foreground">–</span><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/></div><Button variant="outline" size="sm" onClick={exportCSV} className="gap-1.5"><Download className="h-4 w-4"/>Export CSV</Button><PdfButton onExport={exportPDF} perm="stock_card" /></div>} />
+    <PageHeader title="Kartu Stok Detail" description="Telusuri stok berdasarkan batch produksi, essence, box, atau label" actions={<div className="flex flex-wrap items-center gap-2"><div className="flex items-center gap-2 rounded-md border bg-white px-2 py-1"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/><span className="text-muted-foreground">–</span><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/></div><Button variant="outline" size="sm" onClick={exportCSV} className="gap-1.5"><Download className="h-4 w-4"/>Export CSV</Button><PdfButton onExport={exportPDF} perm="stock_card_detail" /></div>} />
 
     <div className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-      <Card><CardContent className="p-4"><Tabs value={mode} onValueChange={switchMode}><TabsList className="mb-4"><TabsTrigger value="product">Berdasarkan Produk</TabsTrigger><TabsTrigger value="recipe">Berdasarkan Recipe</TabsTrigger></TabsList></Tabs><Label className="mb-1.5 text-xs">{mode === 'product' ? 'Pilih Produk' : 'Pilih Recipe'}</Label><SearchableSelect value={selectedId} onValueChange={setSelectedId} options={(mode === 'product' ? products : recipes).map(item => ({ value: item.id, label: item.name, keywords: `${item.code || ''} ${item.sku || ''} ${item.product_name || ''}` }))} placeholder={mode === 'product' ? 'Cari nama produk atau SKU...' : 'Cari recipe...'} className="h-12" /></CardContent></Card>
+      <Card><CardContent className="p-4"><Tabs value={mode} onValueChange={switchMode}><TabsList className="mb-4 grid h-auto w-full grid-cols-2 gap-1 lg:grid-cols-4"><TabsTrigger value="batch">Batch Produksi</TabsTrigger><TabsTrigger value="essence">Bahan Essence</TabsTrigger><TabsTrigger value="box">Bahan Box</TabsTrigger><TabsTrigger value="label">Bahan Label</TabsTrigger></TabsList></Tabs><Label className="mb-1.5 text-xs">{mode === 'batch' ? 'Pilih Batch Produksi' : `Pilih ${mode === 'essence' ? 'Bahan Essence' : mode === 'box' ? 'Bahan Box' : 'Bahan Label'}`}</Label><SearchableSelect value={selectedId} onValueChange={setSelectedId} options={modeItems.map(item => ({ value: item.id, label: mode === 'batch' ? `${item.batch_number || item.production_number} · ${item.product_name || 'Tanpa produk'}` : item.name, keywords: mode === 'batch' ? `${item.batch_number || ''} ${item.production_number || ''} ${item.product_name || ''} ${item.recipe_code || ''}` : `${item.code || ''} ${item.name || ''} ${item.category_name || ''}` }))} placeholder={mode === 'batch' ? 'Cari nomor batch atau produk...' : 'Cari nama atau kode bahan...'} className="h-12" /></CardContent></Card>
       <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Ringkasan Cepat</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-3 p-4 pt-2">
-        {[['Stok Tersedia', available, unitLabel(product?.unit), 'text-blue-600 bg-blue-50', Boxes], ['Stok Dalam Proses', inProcess, inProcessUnit, 'text-amber-600 bg-amber-50', Warehouse], ['Total Masuk', totalIn, totalInUnit, 'text-emerald-600 bg-emerald-50', TrendingUp], ['Total Keluar', totalOut, totalOutUnit, 'text-red-500 bg-red-50', TrendingDown]].map(([label, value, unit, color, Icon]) => <div key={label} className="flex items-center gap-2"><div className={`rounded-full p-2 ${color}`}><Icon className="h-4 w-4"/></div><div><div className="text-[11px] text-muted-foreground">{label}</div><div className={`font-bold ${color.split(' ')[0]}`}>{qty(value)} <span className="text-xs font-normal">{unit}</span></div></div></div>)}
+        {[['Stok Tersedia', available, selectedUnit, 'text-blue-600 bg-blue-50', Boxes], [mode === 'batch' ? 'Stok Dalam Proses' : 'Jumlah Gudang', mode === 'batch' ? inProcess : warehouseStock.length, mode === 'batch' ? inProcessUnit : 'lokasi', 'text-amber-600 bg-amber-50', Warehouse], ['Total Masuk', totalIn, totalInUnit, 'text-emerald-600 bg-emerald-50', TrendingUp], ['Total Keluar', totalOut, totalOutUnit, 'text-red-500 bg-red-50', TrendingDown]].map(([label, value, unit, color, Icon]) => <div key={label} className="flex items-center gap-2"><div className={`rounded-full p-2 ${color}`}><Icon className="h-4 w-4"/></div><div><div className="text-[11px] text-muted-foreground">{label}</div><div className={`font-bold ${color.split(' ')[0]}`}>{qty(value)} <span className="text-xs font-normal">{unit}</span></div></div></div>)}
       </CardContent></Card>
     </div>
 
-    <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+    <div className={`grid gap-4 ${mode === 'batch' ? 'xl:grid-cols-[1.35fr_0.65fr]' : ''}`}>
+      {mode === 'batch' && (
       <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Alur Proses (Recipe Flow)</CardTitle></CardHeader><CardContent className="flex min-h-52 items-stretch gap-2 overflow-x-auto p-4 pt-2">{flow.map((step, index) => { const Icon = step.icon; return <React.Fragment key={step.key}><div className="min-w-[125px] flex-1 rounded-lg border bg-slate-50 p-3 text-center"><div className="mx-auto mb-2 w-fit rounded-full bg-white p-2 shadow-sm"><Icon className="h-4 w-4"/></div><div className="text-xs font-semibold">{step.label}</div><div className="mt-1 text-[10px] text-muted-foreground">{step.stage.replaceAll('_', ' ')}</div><div className="mt-4 text-[10px] text-muted-foreground">Output</div><div className="text-sm font-bold text-emerald-600">{qty(step.quantity)} {step.unit}</div><div className="mt-2 text-[10px] text-muted-foreground">{step.event ? localDate(step.event.transaction_date || step.event.created_date) : 'Belum ada proses'}</div></div>{index < flow.length - 1 && <ArrowRight className="mt-20 h-4 w-4 shrink-0 text-muted-foreground"/>}</React.Fragment>; })}<ArrowRight className="mt-20 h-4 w-4 shrink-0 text-muted-foreground"/><div className="min-w-[125px] flex-1 rounded-lg border border-blue-200 bg-blue-50 p-3 text-center"><div className="mx-auto mb-2 w-fit rounded-full bg-white p-2"><Boxes className="h-4 w-4 text-blue-600"/></div><div className="text-xs font-semibold">Siap Jual</div><div className="mt-1 text-[10px] text-muted-foreground">READY FOR SALE</div><div className="mt-4 text-[10px] text-muted-foreground">Stok Akhir</div><div className="text-sm font-bold text-blue-600">{qty(available)} {unitLabel(product?.unit)}</div></div></CardContent></Card>
+      )}
       <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Stok Saat Ini (Per Gudang)</CardTitle></CardHeader><CardContent className="space-y-3 p-4 pt-2">{warehouseStock.length ? warehouseStock.map((wh, index) => { const total = warehouseStock.reduce((s, x) => s + x.quantity, 0); const percent = total ? wh.quantity / total * 100 : 0; return <div key={wh.id}><div className="mb-1 flex justify-between text-xs"><span className="font-medium">{wh.name}</span><span>{qty(wh.quantity)} {wh.unit} ({percent.toFixed(1)}%)</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${index % 2 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${percent}%` }}/></div></div>; }) : <div className="py-16 text-center text-sm text-muted-foreground">Belum ada stok per gudang</div>}</CardContent></Card>
     </div>
 
     <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Pergerakan Stok</CardTitle></CardHeader><CardContent className="p-4 pt-2"><DataTable columns={columns} data={rows} loading={loading} pageSize={20} emptyMessage="Tidak ada pergerakan stok pada periode ini" searchKeys={['transaction_number','reference_type','warehouse_name','batch_number','notes']} searchPlaceholder="Cari no. transaksi / gudang / batch / keterangan..."/></CardContent></Card>
 
-    <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]"><Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Detail Informasi</CardTitle></CardHeader><CardContent className="grid gap-4 p-4 pt-2 sm:grid-cols-[72px_1fr]"><div className="flex h-20 w-20 items-center justify-center rounded-lg border bg-slate-50"><PackageCheck className="h-8 w-8 text-blue-500"/></div><div><div className="text-base font-bold">{product?.name || 'Pilih produk'}</div><div className="mt-3 grid grid-cols-2 gap-3 text-xs md:grid-cols-4"><div><span className="text-muted-foreground">SKU</span><div className="font-semibold">{product?.sku || product?.code || '—'}</div></div><div><span className="text-muted-foreground">Kategori</span><div className="font-semibold">{product?.category_name || '—'}</div></div><div><span className="text-muted-foreground">Satuan</span><div className="font-semibold">{product?.unit || '—'}</div></div><div><span className="text-muted-foreground">Recipe</span><div className="font-semibold">{selectedRecipeForProduct?.name || '—'}</div></div></div></div></CardContent></Card><Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Ringkasan Periode</CardTitle></CardHeader><CardContent className="space-y-3 p-4 pt-2 text-sm">{[['Saldo Awal', opening, ''], ['Total Masuk', totalIn, 'text-emerald-600'], ['Total Keluar', totalOut, 'text-red-500'], ['Saldo Akhir', opening + totalIn - totalOut, 'text-blue-600']].map(([label, value, color]) => <div key={label} className="flex justify-between border-b pb-2 last:border-0"><span>{label}</span><span className={`font-bold ${color}`}>{qty(value)} {product?.unit || ''}</span></div>)}</CardContent></Card></div>
+    <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]"><Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Detail Informasi</CardTitle></CardHeader><CardContent className="grid gap-4 p-4 pt-2 sm:grid-cols-[72px_1fr]"><div className="flex h-20 w-20 items-center justify-center rounded-lg border bg-slate-50"><PackageCheck className="h-8 w-8 text-blue-500"/></div><div><div className="text-base font-bold">{mode === 'batch' ? `${selectedBatch?.batch_number || 'Pilih batch'} · ${product?.name || ''}` : (selectedMaterial?.name || 'Pilih bahan')}</div><div className="mt-3 grid grid-cols-2 gap-3 text-xs md:grid-cols-4"><div><span className="text-muted-foreground">Kode</span><div className="font-semibold">{mode === 'batch' ? (selectedBatch?.production_number || product?.sku || '—') : (selectedMaterial?.code || '—')}</div></div><div><span className="text-muted-foreground">Kategori</span><div className="font-semibold">{mode === 'batch' ? (product?.category_name || '—') : (selectedMaterial?.category_name || selectedMaterial?.material_category || selectedMaterial?.material_type || '—')}</div></div><div><span className="text-muted-foreground">Satuan</span><div className="font-semibold">{selectedUnit}</div></div><div><span className="text-muted-foreground">{mode === 'batch' ? 'Recipe' : 'Supplier'}</span><div className="font-semibold">{mode === 'batch' ? (selectedRecipeForProduct?.name || selectedBatch?.recipe_code || '—') : (selectedMaterial?.supplier_name || '—')}</div></div></div></div></CardContent></Card><Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Ringkasan Periode</CardTitle></CardHeader><CardContent className="space-y-3 p-4 pt-2 text-sm">{[['Saldo Awal', opening, ''], ['Total Masuk', totalIn, 'text-emerald-600'], ['Total Keluar', totalOut, 'text-red-500'], ['Saldo Akhir', opening + totalIn - totalOut, 'text-blue-600']].map(([label, value, color]) => <div key={label} className="flex justify-between border-b pb-2 last:border-0"><span>{label}</span><span className={`font-bold ${color}`}>{qty(value)} {selectedUnit}</span></div>)}</CardContent></Card></div>
   </div>;
 }

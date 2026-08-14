@@ -23,7 +23,7 @@ const menuItems = [
   { label: 'Penjualan', icon: ShoppingCart, path: '/sales', group: 'operasional', perm: 'sales' },
   { label: 'Pembayaran Piutang', icon: Wallet, path: '/payments', group: 'operasional', perm: 'payments' },
   { label: 'Kartu Stok', icon: ClipboardList, path: '/stock-card', group: 'operasional', perm: 'stock_card' },
-  { label: 'Stock Card Dedicated', icon: ClipboardList, path: '/stock-card-dedicated', group: 'operasional', perm: 'stock_card' },
+  { label: 'Kartu Stok Detail', icon: ClipboardList, path: '/stock-card-dedicated', group: 'operasional', perm: 'stock_card_detail' },
   { label: 'Biaya Operasional', icon: AlertTriangle, path: '/operationalCost', group: 'operasional', perm: 'operational_cost' },
   { label: 'Laporan Penjualan', icon: FileBarChart, path: '/reports/sales', group: 'laporan', perm: 'report_sales' },
   { label: 'Laporan Piutang', icon: FileBarChart, path: '/reports/receivables', group: 'laporan', perm: 'report_receivables' },

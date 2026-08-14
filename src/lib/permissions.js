@@ -225,6 +225,13 @@ export const MENU_CATALOG = [
     actions: ['view']
   },
 
+  {
+    key: 'stock_card_detail',
+    label: 'Kartu Stok Detail',
+    group: 'operasional',
+    actions: ['view']
+  },
+
   // =========================================================
   // LAPORAN
   // =========================================================
@@ -1203,6 +1210,11 @@ export const ROUTE_ACCESS = [
   {
     route: '/stock-card',
     perm: 'stock_card'
+  },
+
+  {
+    route: '/stock-card-dedicated',
+    perm: 'stock_card_detail'
   },
 
   {
