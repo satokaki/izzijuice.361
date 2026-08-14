@@ -601,7 +601,9 @@ export default function Production() {
         product_id:
           recipe.product_id || '',
         product_name:
-          recipe.product_name || '',
+          isPremix
+            ? outputMaterial?.name || recipe.output_material_name || 'Premix'
+            : recipe.product_name || '',
         output_material_id:
           isPremix
             ? recipe.output_material_id || ''
@@ -1426,11 +1428,25 @@ export default function Production() {
     setSubmitting(true);
 
     try {
-      const ledgers =
+      const referenceLedgers =
         await base44.entities.StockLedger.filter({
           reference_type: 'production',
           reference_id: item.id
         });
+
+      const [numberLedgers, batchLedgers] = await Promise.all([
+        item.production_number
+          ? base44.entities.StockLedger.filter({ transaction_number: item.production_number })
+          : Promise.resolve([]),
+        item.batch_number
+          ? base44.entities.StockLedger.filter({ batch_number: item.batch_number })
+          : Promise.resolve([])
+      ]);
+
+      const ledgers = Array.from(new Map(
+        [...referenceLedgers, ...numberLedgers, ...batchLedgers]
+          .map(row => [row.id, row])
+      ).values());
 
       const reversalExists =
         ledgers.some(
@@ -1471,15 +1487,6 @@ export default function Production() {
             ) &&
             Number(row.quantity_in || 0) > 0
         );
-
-      if (
-        consumptionRows.length === 0 &&
-        outputRows.length === 0
-      ) {
-        throw new Error(
-          'Tidak ada transaksi produksi yang dapat di-rollback.'
-        );
-      }
 
       /*
        * DOWNSTREAM GUARD
@@ -1674,7 +1681,9 @@ export default function Production() {
         title: 'VOID Production berhasil',
         description: outputRows.length > 0
           ? `${item.production_number} · output ditarik dan stok bahan dikembalikan`
-          : `${item.production_number} · stok bahan dari produksi parsial dikembalikan`
+          : consumptionRows.length > 0
+            ? `${item.production_number} · stok bahan dari produksi parsial dikembalikan`
+            : `${item.production_number} · dibatalkan tanpa reversal karena tidak pernah mencatat transaksi stok`
       });
 
       await loadData();
@@ -1915,6 +1924,8 @@ export default function Production() {
       render:
         row =>
           row.product_name ||
+          row.output_material_name ||
+          (row.production_type === 'PREMIX' || row.recipe_type === 'PREMIX' ? 'Premix' : '') ||
           '—'
     },
     {
@@ -2154,6 +2165,7 @@ export default function Production() {
           'production_number',
           'batch_number',
           'product_name',
+          'output_material_name',
           'brand_name'
         ]}
         searchPlaceholder="Cari produksi..."

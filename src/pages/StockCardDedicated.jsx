@@ -28,6 +28,14 @@ const FLOW = [
   { key: 'excise_output', label: 'Cukai', stage: 'READY_FOR_SALE', icon: Stamp },
 ];
 
+const MODE_LABEL = {
+  batch: 'Batch Produksi',
+  essence: 'Bahan Essence',
+  bottle: 'Bahan Botol',
+  box: 'Bahan Box',
+  label: 'Bahan Label',
+};
+
 const localDate = (date) => {
   if (!date) return '—';
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date));
@@ -85,8 +93,12 @@ export default function StockCardDedicated() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const bottleIds = useMemo(() => new Set(componentMappings.filter(m => m.component_type === 'bottle').map(m => m.material_id)), [componentMappings]);
   const boxIds = useMemo(() => new Set(componentMappings.filter(m => m.component_type === 'box').map(m => m.material_id)), [componentMappings]);
   const labelIds = useMemo(() => new Set(componentMappings.filter(m => m.component_type === 'label').map(m => m.material_id)), [componentMappings]);
+  const isBottleMaterial = useCallback(m => bottleIds.has(m.id) || m.material_type === 'BOTTLE' || /botol|bottle/i.test(`${m.name} ${m.category_name || ''}`), [bottleIds]);
+  const isLabelMaterial = useCallback(m => labelIds.has(m.id) || ['LABEL', 'STICKER'].includes(m.material_type) || /label|stiker|sticker/i.test(`${m.name} ${m.category_name || ''}`), [labelIds]);
+  const isBoxMaterial = useCallback(m => boxIds.has(m.id) || (!isBottleMaterial(m) && !isLabelMaterial(m) && (m.material_type === 'PACKAGING' || /box|dus|karton/i.test(`${m.name} ${m.category_name || ''}`))), [boxIds, isBottleMaterial, isLabelMaterial]);
   const ledgerUntilDate = useCallback((order) => ledger.filter(row => {
     const day = (row.transaction_date || row.created_date || '').slice(0, 10);
     return row.item_type === 'product' &&
@@ -108,10 +120,11 @@ export default function StockCardDedicated() {
   }), [productionOrders, ledgerUntilDate, stageBalanceFromRows]);
   const modeItems = useMemo(() => {
     if (mode === 'batch') return eligibleBatchOrders;
-    if (mode === 'essence') return materials.filter(m => m.material_category === 'flavor');
-    if (mode === 'box') return materials.filter(m => boxIds.has(m.id) || (m.material_type === 'PACKAGING' && /box|dus|karton/i.test(`${m.name} ${m.category_name || ''}`)));
-    return materials.filter(m => labelIds.has(m.id) || ['LABEL', 'STICKER'].includes(m.material_type));
-  }, [mode, eligibleBatchOrders, materials, boxIds, labelIds]);
+    if (mode === 'essence') return materials.filter(m => m.material_category === 'flavor' && !isBottleMaterial(m) && !isBoxMaterial(m) && !isLabelMaterial(m));
+    if (mode === 'bottle') return materials.filter(isBottleMaterial);
+    if (mode === 'box') return materials.filter(isBoxMaterial);
+    return materials.filter(isLabelMaterial);
+  }, [mode, eligibleBatchOrders, materials, isBottleMaterial, isBoxMaterial, isLabelMaterial]);
   useEffect(() => {
     if (!modeItems.some(item => item.id === selectedId)) {
       setSelectedId(modeItems[0]?.id || '');
@@ -197,11 +210,7 @@ export default function StockCardDedicated() {
 
   const switchMode = value => {
     setMode(value);
-    const items = value === 'batch' ? eligibleBatchOrders : value === 'essence'
-      ? materials.filter(m => m.material_category === 'flavor')
-      : value === 'box' ? materials.filter(m => boxIds.has(m.id) || (m.material_type === 'PACKAGING' && /box|dus|karton/i.test(`${m.name} ${m.category_name || ''}`)))
-      : materials.filter(m => labelIds.has(m.id) || ['LABEL', 'STICKER'].includes(m.material_type));
-    setSelectedId(items[0]?.id || '');
+    setSelectedId('');
   };
 
   const exportRows = rows.map(row => ({
@@ -242,10 +251,10 @@ export default function StockCardDedicated() {
   ];
 
   return <div className="mx-auto max-w-[1500px] space-y-4 p-5">
-    <PageHeader title="Kartu Stok Detail" description="Telusuri stok berdasarkan batch produksi, essence, box, atau label" actions={<div className="flex flex-wrap items-center gap-2"><div className="flex items-center gap-2 rounded-md border bg-white px-2 py-1"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/><span className="text-muted-foreground">–</span><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/></div><Button variant="outline" size="sm" onClick={exportCSV} className="gap-1.5"><Download className="h-4 w-4"/>Export CSV</Button><PdfButton onExport={exportPDF} perm="stock_card_detail" /></div>} />
+    <PageHeader title="Kartu Stok Detail" description="Telusuri stok berdasarkan batch produksi, essence, botol, box, atau label" actions={<div className="flex flex-wrap items-center gap-2"><div className="flex items-center gap-2 rounded-md border bg-white px-2 py-1"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/><span className="text-muted-foreground">–</span><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/></div><Button variant="outline" size="sm" onClick={exportCSV} className="gap-1.5"><Download className="h-4 w-4"/>Export CSV</Button><PdfButton onExport={exportPDF} perm="stock_card_detail" /></div>} />
 
     <div className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-      <Card><CardContent className="p-4"><Tabs value={mode} onValueChange={switchMode}><TabsList className="mb-4 grid h-auto w-full grid-cols-2 gap-1 lg:grid-cols-4"><TabsTrigger value="batch">Batch Produksi</TabsTrigger><TabsTrigger value="essence">Bahan Essence</TabsTrigger><TabsTrigger value="box">Bahan Box</TabsTrigger><TabsTrigger value="label">Bahan Label</TabsTrigger></TabsList></Tabs><Label className="mb-1.5 text-xs">{mode === 'batch' ? 'Pilih Batch Produksi' : `Pilih ${mode === 'essence' ? 'Bahan Essence' : mode === 'box' ? 'Bahan Box' : 'Bahan Label'}`}</Label><SearchableSelect value={selectedId} onValueChange={setSelectedId} options={modeItems.map(item => ({ value: item.id, label: mode === 'batch' ? `${item.batch_number || item.production_number} · ${item.product_name || 'Tanpa produk'}` : item.name, keywords: mode === 'batch' ? `${item.batch_number || ''} ${item.production_number || ''} ${item.product_name || ''} ${item.recipe_code || ''}` : `${item.code || ''} ${item.name || ''} ${item.category_name || ''}` }))} placeholder={mode === 'batch' ? 'Cari nomor batch atau produk...' : 'Cari nama atau kode bahan...'} className="h-12" /></CardContent></Card>
+      <Card><CardContent className="p-4"><Tabs value={mode} onValueChange={switchMode}><TabsList className="mb-4 grid h-auto w-full grid-cols-2 gap-1 lg:grid-cols-5"><TabsTrigger value="batch">Batch Produksi</TabsTrigger><TabsTrigger value="essence">Bahan Essence</TabsTrigger><TabsTrigger value="bottle">Bahan Botol</TabsTrigger><TabsTrigger value="box">Bahan Box</TabsTrigger><TabsTrigger value="label">Bahan Label</TabsTrigger></TabsList></Tabs><Label className="mb-1.5 text-xs">Pilih {MODE_LABEL[mode]}</Label><SearchableSelect value={selectedId} onValueChange={setSelectedId} options={modeItems.map(item => ({ value: item.id, label: mode === 'batch' ? `${item.batch_number || item.production_number} · ${item.product_name || 'Tanpa produk'}` : item.name, keywords: mode === 'batch' ? `${item.batch_number || ''} ${item.production_number || ''} ${item.product_name || ''} ${item.recipe_code || ''}` : `${item.code || ''} ${item.name || ''} ${item.category_name || ''}` }))} placeholder={mode === 'batch' ? 'Cari nomor batch atau produk...' : 'Cari nama atau kode bahan...'} className="h-12" /></CardContent></Card>
       <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Ringkasan Cepat</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-3 p-4 pt-2">
         {[['Stok Tersedia', available, selectedUnit, 'text-blue-600 bg-blue-50', Boxes], [mode === 'batch' ? 'Stok Dalam Proses' : 'Jumlah Gudang', mode === 'batch' ? inProcess : warehouseStock.length, mode === 'batch' ? inProcessUnit : 'lokasi', 'text-amber-600 bg-amber-50', Warehouse], ['Total Masuk', quickTotalIn, quickTotalInUnit, 'text-emerald-600 bg-emerald-50', TrendingUp], ['Total Keluar', quickTotalOut, quickTotalOutUnit, 'text-red-500 bg-red-50', TrendingDown]].map(([label, value, unit, color, Icon]) => <div key={label} className="flex items-center gap-2"><div className={`rounded-full p-2 ${color}`}><Icon className="h-4 w-4"/></div><div><div className="text-[11px] text-muted-foreground">{label}</div><div className={`font-bold ${color.split(' ')[0]}`}>{qty(value)} <span className="text-xs font-normal">{unit}</span></div></div></div>)}
       </CardContent></Card>
