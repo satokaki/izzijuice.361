@@ -35,7 +35,6 @@ import {
 /* ==========================================================
    PRODUCTION ORDER
 ========================================================== */
-
 const PRODUCTION_ORDER = {
   flavor: 10,
   essence: 10,
@@ -54,35 +53,28 @@ const PRODUCTION_ORDER = {
 /* ==========================================================
    PREMIX BUSINESS RULE
 ========================================================== */
-
 const isOneToOnePremix = (material) => {
   if (!material) return false;
-
   const type = String(material.material_type || '').toUpperCase();
   if (type !== 'PREMIX') return false;
-
   const category = String(material.material_category || '').toLowerCase();
   const name = String(material.name || '').toLowerCase();
-
   const isSweetener =
     category === 'sweetener' ||
     name.includes('sweetener') ||
     name.includes('sucralose');
-
   const isCooling =
     category === 'cooling' ||
     name.includes('cooling') ||
     name.includes('chiller') ||
     name.includes('ws23') ||
     name.includes('ws-23');
-
   return isSweetener || isCooling;
 };
 
 export default function Production() {
   const { toast } = useToast();
   const { user } = useAuth();
-
   const [data, setData] = useState([]);
   const [recipes, setRecipes] = useState([]);
   const [materials, setMaterials] = useState([]);
@@ -99,7 +91,6 @@ export default function Production() {
   const [gramasiMap, setGramasiMap] = useState({});
   const [premixPreview, setPremixPreview] = useState(null);
   const [premixConfirmOpen, setPremixConfirmOpen] = useState(false);
-
   const [form, setForm] = useState({
     recipe_id: '',
     target_volume: 1000,
@@ -111,19 +102,15 @@ export default function Production() {
   /* ==========================================================
      LOAD DATA
   ========================================================== */
-
   const loadData = useCallback(async () => {
     setLoading(true);
-
     try {
       const items = await base44.entities.ProductionOrder.list('-created_date', 100);
       setData(items);
-
       const approved = await base44.entities.Recipe.filter({
         status: 'approved'
       });
       setRecipes(approved);
-
       const mats = await base44.entities.Material.filter({
         is_active: true
       });
@@ -145,11 +132,9 @@ export default function Production() {
   /* ==========================================================
      CALCULATE MATERIALS
   ========================================================== */
-
   const calculateMaterials = useCallback(
     async (recipeId, targetValue) => {
       if (!recipeId || !targetValue) return;
-
       const recipe = recipes.find(r => r.id === recipeId);
       if (!recipe) return;
 
@@ -164,7 +149,6 @@ export default function Production() {
       const isPremix = recipe.recipe_type === 'PREMIX';
       const basis = recipe.calculation_basis || 'W_W';
       const targetQty = Number(targetValue);
-
       let items = [];
 
       if (isPremix) {
@@ -187,7 +171,6 @@ export default function Production() {
         const pgMaterial = materials.find(
           m => m.material_category === 'propylene_glycol'
         );
-
         const vgMaterial = materials.find(
           m => m.material_category === 'vegetable_glycerin'
         );
@@ -206,14 +189,12 @@ export default function Production() {
 
         items = (result.items || []).map(item => {
           const mat = matsById[item.material_id];
-
           if (isOneToOnePremix(mat)) {
             return {
               ...item,
               gram: Number(item.volumeMl || 0)
             };
           }
-
           return item;
         });
       }
@@ -222,11 +203,9 @@ export default function Production() {
         items.map(async item => {
           const mat = materials.find(m => m.id === item.material_id);
           const stockRaw = await getStockBalance(item.material_id, 'material');
-
           const density = Number(mat?.density || mat?.default_density || 0);
           const matUnit = mat?.unit || 'gram';
           const requiredGram = Number(item.gram || 0);
-
           let stockGram = Number(stockRaw || 0);
 
           if (isPremix && matUnit === 'mililiter' && density > 0) {
@@ -252,7 +231,6 @@ export default function Production() {
           matsById[item.material_id]?.material_category ||
           item.material_type ||
           '';
-
         return (
           PRODUCTION_ORDER[cat] ??
           PRODUCTION_ORDER[item.material_type] ??
@@ -263,11 +241,7 @@ export default function Production() {
       stockChecks.sort((a, b) => {
         const pa = orderKey(a);
         const pb = orderKey(b);
-
-        if (pa !== pb) {
-          return pa - pb;
-        }
-
+        if (pa !== pb) return pa - pb;
         return String(a.material_name || '').localeCompare(
           String(b.material_name || '')
         );
@@ -292,10 +266,8 @@ export default function Production() {
   /* ==========================================================
      OPEN ADD
   ========================================================== */
-
   const openAdd = () => {
     setEditing(null);
-
     setForm({
       recipe_id: '',
       target_volume: 1000,
@@ -303,7 +275,6 @@ export default function Production() {
       operator: '',
       notes: ''
     });
-
     setCalcItems([]);
     setStockCheck([]);
     setModalOpen(true);
@@ -312,7 +283,6 @@ export default function Production() {
   /* ==========================================================
      OPEN DETAIL
   ========================================================== */
-
   const openDetail = async (item) => {
     setEditing(item);
 
@@ -324,7 +294,6 @@ export default function Production() {
 
     const ck = {};
     const gMap = {};
-
     let expectedTotal = 0;
     let storedTotal = 0;
 
@@ -385,7 +354,6 @@ export default function Production() {
 
     setChecked(ck);
     setGramasiMap(gMap);
-
     setGramasiTidakSinkron(
       isFinished &&
       mats.length > 0 &&
@@ -399,9 +367,151 @@ export default function Production() {
   };
 
   /* ==========================================================
+     CREATE PRODUCTION ORDER
+     Shared by normal and waiting-material flows.
+  ========================================================== */
+  const createProductionOrder = async ({
+    recipe,
+    status,
+    shortageItems = []
+  }) => {
+    const prdNumber =
+      await generateProductionNumber();
+
+    const batchNumber =
+      await generateBatchNumber(
+        recipe?.recipe_type === 'PREMIX'
+          ? 'GEN'
+          : 'MFG'
+      );
+
+    const isPremix =
+      recipe.recipe_type === 'PREMIX';
+
+    const outputMaterial =
+      isPremix
+        ? materials.find(
+            m => m.id === recipe.output_material_id
+          )
+        : null;
+
+    const shortageNote =
+      shortageItems.length > 0
+        ? `Menunggu bahan: ${shortageItems
+            .map(
+              s =>
+                `${s.material_name} kurang ${Math.max(
+                  0,
+                  Number(s.requiredGram || 0) -
+                  Number(s.stockAvailable || 0)
+                ).toFixed(2)}g`
+            )
+            .join(', ')}`
+        : '';
+
+    const production =
+      await base44.entities.ProductionOrder.create({
+        production_number: prdNumber,
+        batch_number: batchNumber,
+        production_date: form.production_date,
+        recipe_id: recipe.id,
+        recipe_code: recipe.code,
+        recipe_version: recipe.version,
+        recipe_type:
+          recipe.recipe_type ||
+          'FINISHED_PRODUCT',
+        production_type:
+          recipe.recipe_type ||
+          'FINISHED_PRODUCT',
+        calculation_basis:
+          recipe.calculation_basis ||
+          'W_W',
+        product_id:
+          recipe.product_id || '',
+        product_name:
+          recipe.product_name || '',
+        output_material_id:
+          isPremix
+            ? recipe.output_material_id || ''
+            : '',
+        output_material_name:
+          outputMaterial?.name ||
+          recipe.output_material_name ||
+          '',
+        brand_id:
+          recipe.brand_id,
+        brand_name:
+          recipe.brand_name,
+        target_volume:
+          isPremix
+            ? 0
+            : Number(form.target_volume),
+        target_quantity:
+          isPremix
+            ? Number(form.target_volume)
+            : 0,
+        target_unit:
+          isPremix
+            ? (
+                recipe.calculation_basis === 'W_W'
+                  ? 'gram'
+                  : 'mililiter'
+              )
+            : 'mililiter',
+        actual_volume: 0,
+        operator: form.operator,
+        approver: '',
+        status,
+        recipe_snapshot:
+          JSON.stringify(recipe),
+        notes:
+          [form.notes, shortageNote]
+            .filter(Boolean)
+            .join('\n')
+      });
+
+    await base44.entities.ProductionMaterial.bulkCreate(
+      calcItems.map(item => ({
+        production_id: production.id,
+        material_id: item.material_id,
+        material_name: item.material_name,
+        material_type: item.material_type,
+        percentage: item.percentage,
+        required_ml: item.volumeMl,
+        required_gram: item.gram,
+        actual_gram: 0,
+        deviation_gram: 0,
+        deviation_percent: 0,
+        stock_available: item.stockAvailable,
+        stock_sufficient: item.stockSufficient
+      }))
+    );
+
+    await createAuditLog({
+      module: 'Produksi',
+      action:
+        status === 'menunggu_bahan'
+          ? 'Simpan Menunggu Bahan'
+          : 'Tambah',
+      entity_type: 'ProductionOrder',
+      entity_id: production.id,
+      reference_number: prdNumber,
+      data_after: {
+        status,
+        shortage_count: shortageItems.length
+      }
+    });
+
+    return {
+      production,
+      prdNumber,
+      batchNumber
+    };
+  };
+
+  /* ==========================================================
      SUBMIT PRODUCTION
   ========================================================== */
-
   const handleSubmit = async () => {
     if (
       !form.recipe_id ||
@@ -445,132 +555,36 @@ export default function Production() {
       s => !s.stockSufficient
     );
 
-    if (
-      insufficient.length > 0
-    ) {
-      toast({
-        variant: 'destructive',
-        title: 'Stok tidak mencukupi',
-        description:
-          insufficient
-            .map(
-              s =>
-                `${s.material_name}: butuh ${s.requiredGram.toFixed(1)}g, tersedia ${s.stockAvailable.toFixed(1)}g`
-            )
-            .join(', ')
-      });
-      return;
-    }
-
     setSubmitting(true);
 
     try {
-      const prdNumber =
-        await generateProductionNumber();
-
-      // v3.6 Beta:
-      // - Produk Jadi -> batch MFG (Manufacturing)
-      // - Premix      -> batch GEN
-      // Hanya prefix nomor batch yang berubah.
-      // brand_id / brand_name / product_id / product_name tetap tersimpan.
-      const batchNumber =
-        await generateBatchNumber(
-          recipe?.recipe_type === 'PREMIX'
-            ? 'GEN'
-            : 'MFG'
-        );
-
-      const isPremix =
-        recipe.recipe_type === 'PREMIX';
-
-      const outputMaterial =
-        isPremix
-          ? materials.find(
-              m => m.id === recipe.output_material_id
-            )
-          : null;
-
-      const production =
-        await base44.entities.ProductionOrder.create({
-          production_number: prdNumber,
-          batch_number: batchNumber,
-          production_date: form.production_date,
-          recipe_id: recipe.id,
-          recipe_code: recipe.code,
-          recipe_version: recipe.version,
-          recipe_type:
-            recipe.recipe_type ||
-            'FINISHED_PRODUCT',
-          production_type:
-            recipe.recipe_type ||
-            'FINISHED_PRODUCT',
-          calculation_basis:
-            recipe.calculation_basis ||
-            'W_W',
-          product_id:
-            recipe.product_id || '',
-          product_name:
-            recipe.product_name || '',
-          output_material_id:
-            isPremix
-              ? recipe.output_material_id || ''
-              : '',
-          output_material_name:
-            outputMaterial?.name ||
-            recipe.output_material_name ||
-            '',
-          brand_id:
-            recipe.brand_id,
-          brand_name:
-            recipe.brand_name,
-          target_volume:
-            isPremix
-              ? 0
-              : Number(form.target_volume),
-          target_quantity:
-            isPremix
-              ? Number(form.target_volume)
-              : 0,
-          target_unit:
-            isPremix
-              ? (
-                  recipe.calculation_basis === 'W_W'
-                    ? 'gram'
-                    : 'mililiter'
-                )
-              : 'mililiter',
-          actual_volume: 0,
-          operator: form.operator,
-          approver: '',
-          status: 'siap_produksi',
-          recipe_snapshot:
-            JSON.stringify(recipe),
-          notes: form.notes
+      if (insufficient.length > 0) {
+        const {
+          prdNumber,
+          batchNumber
+        } = await createProductionOrder({
+          recipe,
+          status: 'menunggu_bahan',
+          shortageItems: insufficient
         });
 
-      await base44.entities.ProductionMaterial.bulkCreate(
-        calcItems.map(item => ({
-          production_id: production.id,
-          material_id: item.material_id,
-          material_name: item.material_name,
-          material_type: item.material_type,
-          percentage: item.percentage,
-          required_ml: item.volumeMl,
-          required_gram: item.gram,
-          actual_gram: 0,
-          deviation_gram: 0,
-          deviation_percent: 0,
-          stock_available: item.stockAvailable,
-          stock_sufficient: item.stockSufficient
-        }))
-      );
+        toast({
+          title: 'Produksi disimpan · Menunggu Bahan',
+          description:
+            `${prdNumber} · ${batchNumber} · ${insufficient.length} bahan belum cukup`
+        });
 
-      await createAuditLog({
-        module: 'Produksi',
-        action: 'Tambah',
-        entity_type: 'ProductionOrder',
-        entity_id: production.id,
-        reference_number: prdNumber
+        setModalOpen(false);
+        await loadData();
+        return;
+      }
+
+      const {
+        prdNumber,
+        batchNumber
+      } = await createProductionOrder({
+        recipe,
+        status: 'siap_produksi'
       });
 
       toast({
@@ -580,7 +594,8 @@ export default function Production() {
       });
 
       setModalOpen(false);
-      loadData();
+      await loadData();
+
     } catch (e) {
       toast({
         variant: 'destructive',
@@ -593,9 +608,155 @@ export default function Production() {
   };
 
   /* ==========================================================
+     RE-CHECK WAITING MATERIALS
+     No StockLedger movement here.
+  ========================================================== */
+  const handleActivateWaiting = async (item) => {
+    if (
+      item.status !== 'menunggu_bahan'
+    ) {
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const mats =
+        await base44.entities.ProductionMaterial.filter({
+          production_id: item.id
+        });
+
+      const checks =
+        await Promise.all(
+          mats.map(async m => {
+            const mat =
+              materials.find(
+                x => x.id === m.material_id
+              );
+
+            const stockRaw =
+              await getStockBalance(
+                m.material_id,
+                'material'
+              );
+
+            const density =
+              Number(
+                mat?.density ||
+                mat?.default_density ||
+                0
+              );
+
+            const unit =
+              String(
+                mat?.unit || 'gram'
+              ).toLowerCase();
+
+            let availableGram =
+              Number(stockRaw || 0);
+
+            if (
+              item.production_type === 'PREMIX' &&
+              unit === 'mililiter' &&
+              density > 0
+            ) {
+              availableGram =
+                Number(stockRaw || 0) *
+                density;
+            }
+
+            const requiredGram =
+              Number(m.required_gram || 0);
+
+            return {
+              row: m,
+              material:
+                mat,
+              availableGram,
+              requiredGram,
+              sufficient:
+                availableGram >= requiredGram
+            };
+          })
+        );
+
+      const insufficient =
+        checks.filter(
+          row => !row.sufficient
+        );
+
+      for (const check of checks) {
+        await base44.entities.ProductionMaterial.update(
+          check.row.id,
+          {
+            stock_available:
+              check.availableGram,
+            stock_sufficient:
+              check.sufficient
+          }
+        );
+      }
+
+      if (insufficient.length > 0) {
+        toast({
+          variant: 'destructive',
+          title: 'Bahan masih belum cukup',
+          description:
+            insufficient
+              .map(
+                row =>
+                  `${row.row.material_name}: butuh ${row.requiredGram.toFixed(1)}g, tersedia ${row.availableGram.toFixed(1)}g`
+              )
+              .join(', ')
+        });
+        return;
+      }
+
+      await base44.entities.ProductionOrder.update(
+        item.id,
+        {
+          status: 'siap_produksi'
+        }
+      );
+
+      await createAuditLog({
+        module: 'Produksi',
+        action: 'Bahan Tersedia',
+        entity_type: 'ProductionOrder',
+        entity_id: item.id,
+        reference_number:
+          item.production_number,
+        data_before: {
+          status: 'menunggu_bahan'
+        },
+        data_after: {
+          status: 'siap_produksi'
+        }
+      });
+
+      toast({
+        title: 'Bahan sudah tersedia',
+        description:
+          `${item.production_number} sekarang siap diproduksi`
+      });
+
+      await loadData();
+
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Gagal mengecek stok bahan',
+        description:
+          e?.message || 'Terjadi kesalahan'
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* ==========================================================
      POST PRODUCTION
   ========================================================== */
-
   const handlePost = async () => {
     if (!editing) return;
 
@@ -830,6 +991,7 @@ export default function Production() {
           title: 'Produksi Premix berhasil diposting',
           description: 'Stok bahan dikurangi, stok premix ditambahkan'
         });
+
       } else {
         let actualVolume = 0;
 
@@ -934,6 +1096,7 @@ export default function Production() {
 
       setDetailOpen(false);
       loadData();
+
     } catch (e) {
       toast({
         variant: 'destructive',
@@ -948,7 +1111,6 @@ export default function Production() {
   /* ==========================================================
      PREMIX POST PREVIEW
   ========================================================== */
-
   const handlePostRequest = () => {
     if (
       !editing ||
@@ -1055,7 +1217,6 @@ export default function Production() {
   /* ==========================================================
      CANCEL
   ========================================================== */
-
   const handleCancel = async (item) => {
     if (
       !confirm(
@@ -1087,6 +1248,7 @@ export default function Production() {
       });
 
       loadData();
+
     } catch {
       toast({
         variant: 'destructive',
@@ -1098,7 +1260,6 @@ export default function Production() {
   /* ==========================================================
      PDF
   ========================================================== */
-
   const exportProductionPDF = async (row) => {
     if (!hasPermission(user, 'production', 'download')) {
       toast({
@@ -1247,6 +1408,7 @@ export default function Production() {
         fileName:
           `wo-${row.production_number}.pdf`
       });
+
     } catch {
       toast({
         variant: 'destructive',
@@ -1258,7 +1420,6 @@ export default function Production() {
   /* ==========================================================
      TABLE COLUMNS
   ========================================================== */
-
   const columns = [
     {
       key: 'production_number',
@@ -1314,7 +1475,7 @@ export default function Production() {
     {
       key: 'actions',
       header: '',
-      width: '100px',
+      width: '120px',
       render:
         row => (
           <div className="flex items-center gap-1">
@@ -1327,6 +1488,20 @@ export default function Production() {
               iconOnly
               label="Cetak Work Order"
             />
+
+            {row.status ===
+              'menunggu_bahan' && (
+              <button
+                onClick={() =>
+                  handleActivateWaiting(row)
+                }
+                disabled={submitting}
+                className="p-1.5 hover:bg-amber-50 rounded text-amber-600 disabled:opacity-40"
+                title="Cek stok & aktifkan produksi"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+              </button>
+            )}
 
             {row.status ===
               'siap_produksi' && (
@@ -1387,7 +1562,6 @@ export default function Production() {
   /* ==========================================================
      VIEW DATA
   ========================================================== */
-
   const selectedRecipe =
     recipes.find(
       r => r.id === form.recipe_id
@@ -1445,10 +1619,14 @@ export default function Production() {
       0
     );
 
+  const hasInsufficientStock =
+    stockCheck.some(
+      item => !item.stockSufficient
+    );
+
   /* ==========================================================
      RENDER
   ========================================================== */
-
   return (
     <div className="p-5 max-w-[1400px] mx-auto">
       <PageHeader
@@ -1488,7 +1666,11 @@ export default function Production() {
         title="Produksi Baru"
         onSubmit={handleSubmit}
         submitting={submitting}
-        submitLabel="Buat Produksi"
+        submitLabel={
+          hasInsufficientStock
+            ? 'Simpan Menunggu Bahan'
+            : 'Buat Produksi'
+        }
         size="lg"
       >
         <div className="grid grid-cols-2 gap-3">
@@ -1602,11 +1784,13 @@ export default function Production() {
         {selectedRecipe &&
           stockCheck.length > 0 && (
           <div className="border-t pt-3 mt-2">
+
             <Label className="text-[12.5px] font-semibold mb-2 block">
               Ringkasan Produksi
             </Label>
 
             <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+
               <div className="bg-muted/40 rounded px-2 py-1.5">
                 Recipe Type:
                 <b>
@@ -1679,9 +1863,17 @@ export default function Production() {
 
         {stockCheck.length > 0 && (
           <div className="border-t pt-3 mt-2">
+
             <Label className="text-[12.5px] font-semibold mb-2 block">
               Pemeriksaan Stok Bahan
             </Label>
+
+            {hasInsufficientStock && (
+              <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-700">
+                ⚠ Ada bahan yang belum cukup. Order tetap dapat disimpan sebagai
+                <b> Menunggu Bahan</b>. Pada tahap ini stok belum dikurangi.
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <table className="w-full text-[11.5px]">
@@ -1976,20 +2168,24 @@ export default function Production() {
                       <td className="px-2 py-1">
                         {r.name}
                       </td>
+
                       <td className="px-2 py-1">
                         {r.unit}
                       </td>
+
                       <td className="px-2 py-1 text-right tabular-nums">
                         {formatNumber(
                           r.required_gram,
                           2
                         )}
                       </td>
+
                       <td className="px-2 py-1 text-right tabular-nums">
                         {formatCurrency(
                           r.price_per_gram
                         )}
                       </td>
+
                       <td className="px-2 py-1 text-right tabular-nums">
                         {formatCurrency(
                           r.cost
@@ -2007,6 +2203,7 @@ export default function Production() {
                   >
                     Total Input Cost
                   </td>
+
                   <td className="px-2 py-1 text-right tabular-nums">
                     {formatCurrency(
                       premixPreview?.total || 0
