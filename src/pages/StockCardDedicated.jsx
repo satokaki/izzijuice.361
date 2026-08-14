@@ -115,7 +115,7 @@ export default function StockCardDedicated() {
     if (isCancelled || isPremix || !order.product_id || !order.batch_number) return false;
 
     const history = ledgerUntilDate(order);
-    return ['READY_FOR_LABELING', 'UNEXCISED', 'READY_FOR_SALE']
+    return ['BULK', 'READY_FOR_LABELING', 'UNEXCISED', 'READY_FOR_SALE']
       .some(stage => stageBalanceFromRows(history, stage) > 0.000001);
   }), [productionOrders, ledgerUntilDate, stageBalanceFromRows]);
   const modeItems = useMemo(() => {
