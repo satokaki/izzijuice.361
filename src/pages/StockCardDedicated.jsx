@@ -90,7 +90,6 @@ export default function StockCardDedicated() {
   const ledgerUntilDate = useCallback((order) => ledger.filter(row => {
     const day = (row.transaction_date || row.created_date || '').slice(0, 10);
     return row.item_type === 'product' &&
-      row.item_id === order.product_id &&
       row.batch_number === order.batch_number &&
       (!dateTo || day <= dateTo);
   }), [ledger, dateTo]);
@@ -128,14 +127,14 @@ export default function StockCardDedicated() {
 
   const rows = useMemo(() => ledger
     .filter(row => mode === 'batch'
-      ? row.item_type === 'product' && row.item_id === productId && (!selectedBatch?.batch_number || row.batch_number === selectedBatch.batch_number)
+      ? row.item_type === 'product' && row.batch_number === selectedBatch?.batch_number
       : row.item_type === 'material' && row.item_id === selectedId)
     .filter(row => {
       const day = (row.transaction_date || row.created_date || '').slice(0, 10);
       return (!dateFrom || day >= dateFrom) && (!dateTo || day <= dateTo);
     })
     .sort((a, b) => String(b.transaction_date || b.created_date).localeCompare(String(a.transaction_date || a.created_date))),
-  [ledger, mode, productId, selectedId, selectedBatch?.batch_number, dateFrom, dateTo]);
+  [ledger, mode, selectedId, selectedBatch?.batch_number, dateFrom, dateTo]);
 
   const batchHistoryRows = useMemo(() => selectedBatch ? ledgerUntilDate(selectedBatch) : [], [selectedBatch, ledgerUntilDate]);
   const historicalBatchBalances = useMemo(() => Object.values(batchHistoryRows.reduce((acc, row) => {
