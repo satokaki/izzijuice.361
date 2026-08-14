@@ -120,7 +120,7 @@ export default function StockCardDedicated() {
   }), [productionOrders, ledgerUntilDate, stageBalanceFromRows]);
   const modeItems = useMemo(() => {
     if (mode === 'batch') return eligibleBatchOrders;
-    if (mode === 'essence') return materials.filter(m => m.material_category === 'flavor' && !isBottleMaterial(m) && !isBoxMaterial(m) && !isLabelMaterial(m));
+    if (mode === 'essence') return materials.filter(m => m.material_type === 'RAW_MATERIAL' && m.material_category === 'flavor' && !isBottleMaterial(m) && !isBoxMaterial(m) && !isLabelMaterial(m));
     if (mode === 'bottle') return materials.filter(isBottleMaterial);
     if (mode === 'box') return materials.filter(isBoxMaterial);
     return materials.filter(isLabelMaterial);
