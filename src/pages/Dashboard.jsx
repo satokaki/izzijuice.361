@@ -756,6 +756,9 @@ export default function Dashboard() {
                 label="Menunggu Bahan"
                 value={stats.waitingMaterials}
                 color="bg-amber-50 text-amber-600"
+                onClick={() =>
+                  navigate('/production')
+                }
               />
             </>
           )}
