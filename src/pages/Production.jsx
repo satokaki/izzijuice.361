@@ -9,7 +9,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Pencil, Play, CheckCircle, AlertTriangle, RefreshCw, X } from 'lucide-react';
+import { Plus, Pencil, Play, CheckCircle, AlertTriangle, RefreshCw, RotateCcw, X } from 'lucide-react';
 import { calculateRecipe } from '@/lib/recipeCalculator';
 import { calculatePremixQuantities } from '@/lib/premix';
 import { generateProductionNumber, generateBatchNumber } from '@/lib/sequence';
@@ -1376,6 +1376,307 @@ export default function Production() {
   };
 
   /* ==========================================================
+     VOID PRODUCTION / STOCK REVERSAL
+     - Hanya untuk produksi yang sudah diposting.
+     - Output harus masih utuh / belum dipakai downstream.
+     - Output ditarik kembali.
+     - Semua konsumsi bahan dikembalikan ke identity ledger asli.
+     - Frozen unit_cost dari StockLedger asli dipakai untuk reversal.
+     - Double VOID diblok dengan status dibatalkan.
+  ========================================================== */
+  const handleVoidProduction = async (item) => {
+    if (
+      ![
+        'siap_bottling',
+        'selesai_mixing'
+      ].includes(item.status)
+    ) {
+      toast({
+        variant: 'destructive',
+        title: 'VOID tidak tersedia',
+        description: 'Hanya produksi yang sudah diposting dan belum di-VOID yang dapat dibalik.'
+      });
+      return;
+    }
+
+    if (
+      !confirm(
+        `VOID produksi "${item.production_number}"?\n\n` +
+        'Output produksi akan ditarik kembali dan seluruh bahan akan dikembalikan. ' +
+        'VOID diblok jika output sudah digunakan proses berikutnya.'
+      )
+    ) {
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const ledgers =
+        await base44.entities.StockLedger.filter({
+          reference_type: 'production',
+          reference_id: item.id
+        });
+
+      const reversalExists =
+        ledgers.some(
+          row =>
+            row.transaction_type === 'production_reversal'
+        );
+
+      if (reversalExists) {
+        throw new Error(
+          'Produksi ini sudah memiliki transaksi reversal / VOID.'
+        );
+      }
+
+      const consumptionTypes = [
+        'production_consumption',
+        'premix_consumption'
+      ];
+
+      const outputTypes = [
+        'production_output',
+        'premix_output'
+      ];
+
+      const consumptionRows =
+        ledgers.filter(
+          row =>
+            consumptionTypes.includes(
+              row.transaction_type
+            ) &&
+            Number(row.quantity_out || 0) > 0
+        );
+
+      const outputRows =
+        ledgers.filter(
+          row =>
+            outputTypes.includes(
+              row.transaction_type
+            ) &&
+            Number(row.quantity_in || 0) > 0
+        );
+
+      if (
+        consumptionRows.length === 0 ||
+        outputRows.length === 0
+      ) {
+        throw new Error(
+          'Ledger produksi tidak lengkap. VOID dihentikan untuk mencegah saldo salah.'
+        );
+      }
+
+      /*
+       * DOWNSTREAM GUARD
+       *
+       * Sebelum reversal, output produksi harus masih tersedia
+       * pada StockBalance yang sama. Jika jumlahnya sudah berkurang,
+       * berarti output telah dipakai / dipindah / dikoreksi.
+       */
+      for (const output of outputRows) {
+        const balanceFilter = {
+          item_id: output.item_id
+        };
+
+        if (output.batch_id) {
+          balanceFilter.batch_id =
+            output.batch_id;
+        }
+
+        if (output.warehouse_id) {
+          balanceFilter.warehouse_id =
+            output.warehouse_id;
+        }
+
+        if (output.inventory_status) {
+          balanceFilter.inventory_status =
+            output.inventory_status;
+        }
+
+        const outputBalances =
+          await base44.entities.StockBalance.filter(
+            balanceFilter
+          );
+
+        const matchingBalance =
+          outputBalances.find(
+            balance =>
+              (balance.item_id || '') ===
+                (output.item_id || '') &&
+              (balance.batch_id || '') ===
+                (output.batch_id || '') &&
+              (balance.warehouse_id || '') ===
+                (output.warehouse_id || '') &&
+              (balance.inventory_status || '') ===
+                (output.inventory_status || '')
+          ) ||
+          outputBalances[0] ||
+          null;
+
+        const available =
+          Number(
+            matchingBalance?.available_quantity ??
+            matchingBalance?.quantity ??
+            0
+          );
+
+        const required =
+          Number(output.quantity_in || 0);
+
+        if (
+          !matchingBalance ||
+          available < required
+        ) {
+          throw new Error(
+            `VOID diblok. Output ${output.item_name || item.batch_number} ` +
+            `sudah digunakan proses berikutnya atau stoknya berubah. ` +
+            `Tersedia ${available}, dibutuhkan ${required}.`
+          );
+        }
+      }
+
+      const voidNumber =
+        `VOID-${item.production_number}`;
+
+      /*
+       * 1. Tarik output produksi.
+       */
+      for (const output of outputRows) {
+        await recordStockMovement({
+          item_type:
+            output.item_type,
+          item_id:
+            output.item_id,
+          item_code:
+            output.item_code || '',
+          item_name:
+            output.item_name || '',
+          batch_id:
+            output.batch_id || '',
+          batch_number:
+            output.batch_number || '',
+          warehouse_id:
+            output.warehouse_id || '',
+          warehouse_name:
+            output.warehouse_name || '',
+          inventory_status:
+            output.inventory_status || '',
+          quantity_in: 0,
+          quantity_out:
+            Number(output.quantity_in || 0),
+          unit:
+            output.unit || '',
+          unit_cost:
+            Number(output.unit_cost || 0),
+          transaction_type:
+            'production_reversal',
+          transaction_number:
+            voidNumber,
+          reference_type:
+            'production',
+          reference_id:
+            item.id,
+          notes:
+            `VOID Production · tarik output ${item.production_number}`
+        });
+      }
+
+      /*
+       * 2. Kembalikan seluruh bahan ke batch/stage/gudang
+       *    yang sama dengan transaksi konsumsi asli.
+       */
+      for (const row of consumptionRows) {
+        await recordStockMovement({
+          item_type:
+            row.item_type,
+          item_id:
+            row.item_id,
+          item_code:
+            row.item_code || '',
+          item_name:
+            row.item_name || '',
+          batch_id:
+            row.batch_id || '',
+          batch_number:
+            row.batch_number || '',
+          warehouse_id:
+            row.warehouse_id || '',
+          warehouse_name:
+            row.warehouse_name || '',
+          inventory_status:
+            row.inventory_status || '',
+          quantity_in:
+            Number(row.quantity_out || 0),
+          quantity_out: 0,
+          unit:
+            row.unit || '',
+          unit_cost:
+            Number(row.unit_cost || 0),
+          transaction_type:
+            'production_reversal',
+          transaction_number:
+            voidNumber,
+          reference_type:
+            'production',
+          reference_id:
+            item.id,
+          notes:
+            `VOID Production · kembalikan bahan ${item.production_number}`
+        });
+      }
+
+      await base44.entities.ProductionOrder.update(
+        item.id,
+        {
+          status: 'dibatalkan'
+        }
+      );
+
+      await createAuditLog({
+        module: 'Produksi',
+        action: 'VOID',
+        entity_type: 'ProductionOrder',
+        entity_id: item.id,
+        reference_number:
+          item.production_number,
+        reason:
+          'VOID Production / stock reversal',
+        data_before: {
+          status: item.status
+        },
+        data_after: {
+          status: 'dibatalkan',
+          reversal_number:
+            voidNumber,
+          output_reversal_count:
+            outputRows.length,
+          material_reversal_count:
+            consumptionRows.length
+        }
+      });
+
+      toast({
+        title: 'VOID Production berhasil',
+        description:
+          `${item.production_number} · output ditarik dan stok bahan dikembalikan`
+      });
+
+      await loadData();
+
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'VOID Production gagal',
+        description:
+          e?.message || 'Terjadi kesalahan'
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* ==========================================================
      CANCEL
   ========================================================== */
   const handleCancel = async (item) => {
@@ -1704,6 +2005,24 @@ export default function Production() {
               >
                 <CheckCircle className="w-3.5 h-3.5" />
               </span>
+            )}
+
+            {[
+              'siap_bottling',
+              'selesai_mixing'
+            ].includes(row.status) && (
+              <button
+                type="button"
+                onClick={() =>
+                  handleVoidProduction(row)
+                }
+                disabled={submitting}
+                className="p-1.5 hover:bg-amber-50 rounded text-amber-600 disabled:opacity-40"
+                title="VOID Production · reversal stok"
+                aria-label="VOID Production"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
             )}
 
             {![
