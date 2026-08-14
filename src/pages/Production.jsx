@@ -9,7 +9,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Pencil, Play, CheckCircle, AlertTriangle, X } from 'lucide-react';
+import { Plus, Pencil, Play, CheckCircle, AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { calculateRecipe } from '@/lib/recipeCalculator';
 import { calculatePremixQuantities } from '@/lib/premix';
 import { generateProductionNumber, generateBatchNumber } from '@/lib/sequence';
@@ -608,7 +608,9 @@ export default function Production() {
   };
 
   /* ==========================================================
-     RE-CHECK WAITING MATERIALS
+     REFRESH PRODUCTION — MENUNGGU BAHAN
+     Re-read current material stock and activate the order only
+     when every required material is sufficient.
      No StockLedger movement here.
   ========================================================== */
   const handleActivateWaiting = async (item) => {
@@ -1492,14 +1494,20 @@ export default function Production() {
             {row.status ===
               'menunggu_bahan' && (
               <button
+                type="button"
                 onClick={() =>
                   handleActivateWaiting(row)
                 }
                 disabled={submitting}
-                className="p-1.5 hover:bg-amber-50 rounded text-amber-600 disabled:opacity-40"
-                title="Cek stok & aktifkan produksi"
+                className="p-1.5 hover:bg-blue-50 rounded text-blue-600 disabled:opacity-40"
+                title="Refresh stok bahan"
+                aria-label="Refresh stok bahan"
               >
-                <AlertTriangle className="w-3.5 h-3.5" />
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${
+                    submitting ? 'animate-spin' : ''
+                  }`}
+                />
               </button>
             )}
 
