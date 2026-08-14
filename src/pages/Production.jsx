@@ -130,6 +130,174 @@ export default function Production() {
   }, [loadData]);
 
   /* ==========================================================
+     MATERIAL STOCK SOURCE
+     PREMIX materials must read only PREMIX StockBalance.
+     Raw materials keep the existing aggregate stock behavior.
+  ========================================================== */
+  const getMaterialAvailableStock = useCallback(
+    async (materialId, material) => {
+      const isPremixMaterial =
+        String(material?.material_type || '').toUpperCase() === 'PREMIX';
+
+      if (!isPremixMaterial) {
+        return getStockBalance(materialId, 'material');
+      }
+
+      const premixBalances =
+        await base44.entities.StockBalance.filter({
+          item_id: materialId,
+          item_type: 'material',
+          inventory_status: 'PREMIX'
+        });
+
+      return premixBalances.reduce(
+        (sum, balance) =>
+          sum +
+          Number(
+            balance.available_quantity ??
+            balance.quantity ??
+            0
+          ),
+        0
+      );
+    },
+    []
+  );
+
+  /* ==========================================================
+     PREMIX CONSUMPTION
+     Consume PREMIX stock by its real StockBalance identity
+     (stage + batch + warehouse), FIFO across available lots.
+  ========================================================== */
+  const consumeMaterialStock = useCallback(
+    async ({
+      productionMaterial,
+      material,
+      quantity,
+      transactionType,
+      production
+    }) => {
+      const isPremixMaterial =
+        String(material?.material_type || '').toUpperCase() === 'PREMIX';
+
+      const common = {
+        item_type: 'material',
+        item_id: productionMaterial.material_id,
+        item_name: productionMaterial.material_name,
+        item_code: material?.code || '',
+        quantity_out: quantity,
+        unit: 'gram',
+        unit_cost: Number(
+          material?.last_purchase_price || 0
+        ),
+        transaction_type: transactionType,
+        transaction_number:
+          production.production_number,
+        reference_type: 'production',
+        reference_id: production.id
+      };
+
+      if (!isPremixMaterial) {
+        await recordStockMovement({
+          ...common,
+          notes:
+            production.production_type === 'PREMIX'
+              ? `Produksi premix ${production.batch_number}`
+              : `Produksi ${production.batch_number}`
+        });
+        return;
+      }
+
+      const premixBalances =
+        await base44.entities.StockBalance.filter({
+          item_id: productionMaterial.material_id,
+          item_type: 'material',
+          inventory_status: 'PREMIX'
+        });
+
+      const availableLots =
+        premixBalances
+          .filter(
+            balance =>
+              Number(
+                balance.available_quantity ??
+                balance.quantity ??
+                0
+              ) > 0
+          )
+          .sort((a, b) => {
+            const da =
+              a.created_date ||
+              a.updated_date ||
+              '';
+            const db =
+              b.created_date ||
+              b.updated_date ||
+              '';
+            return da.localeCompare(db);
+          });
+
+      const totalAvailable =
+        availableLots.reduce(
+          (sum, balance) =>
+            sum +
+            Number(
+              balance.available_quantity ??
+              balance.quantity ??
+              0
+            ),
+          0
+        );
+
+      if (totalAvailable < quantity) {
+        throw new Error(
+          `Stok PREMIX ${productionMaterial.material_name} tidak mencukupi. ` +
+          `Stok: ${totalAvailable}, dibutuhkan: ${quantity}`
+        );
+      }
+
+      let remaining = quantity;
+
+      for (const balance of availableLots) {
+        if (remaining <= 0) break;
+
+        const available =
+          Number(
+            balance.available_quantity ??
+            balance.quantity ??
+            0
+          );
+
+        const take =
+          Math.min(
+            remaining,
+            available
+          );
+
+        await recordStockMovement({
+          ...common,
+          batch_id:
+            balance.batch_id || '',
+          batch_number:
+            balance.batch_number || '',
+          warehouse_id:
+            balance.warehouse_id || '',
+          warehouse_name:
+            balance.warehouse_name || '',
+          inventory_status: 'PREMIX',
+          quantity_out: take,
+          notes:
+            `Produksi ${production.batch_number} · ` +
+            `konsumsi PREMIX ${balance.batch_number || '-'}`
+        });
+
+        remaining -= take;
+      }
+    },
+    []
+  );
+
+  /* ==========================================================
      CALCULATE MATERIALS
   ========================================================== */
   const calculateMaterials = useCallback(
@@ -202,7 +370,11 @@ export default function Production() {
       const stockChecks = await Promise.all(
         items.map(async item => {
           const mat = materials.find(m => m.id === item.material_id);
-          const stockRaw = await getStockBalance(item.material_id, 'material');
+          const stockRaw =
+            await getMaterialAvailableStock(
+              item.material_id,
+              mat
+            );
           const density = Number(mat?.density || mat?.default_density || 0);
           const matUnit = mat?.unit || 'gram';
           const requiredGram = Number(item.gram || 0);
@@ -250,7 +422,7 @@ export default function Production() {
       setCalcItems(stockChecks);
       setStockCheck(stockChecks);
     },
-    [recipes, materials]
+    [recipes, materials, getMaterialAvailableStock]
   );
 
   useEffect(() => {
@@ -637,9 +809,9 @@ export default function Production() {
               );
 
             const stockRaw =
-              await getStockBalance(
+              await getMaterialAvailableStock(
                 m.material_id,
-                'material'
+                mat
               );
 
             const density =
@@ -852,25 +1024,12 @@ export default function Production() {
             x => x.id === m.material_id
           );
 
-        await recordStockMovement({
-          item_type: 'material',
-          item_id: m.material_id,
-          item_name: m.material_name,
-          item_code: mat?.code || '',
-          quantity_out: actual,
-          unit: 'gram',
-          unit_cost: Number(
-            mat?.last_purchase_price || 0
-          ),
-          transaction_type: consumeType,
-          transaction_number:
-            editing.production_number,
-          reference_type: 'production',
-          reference_id: editing.id,
-          notes:
-            isPremixProduction
-              ? `Produksi premix ${editing.batch_number}`
-              : `Produksi ${editing.batch_number}`
+        await consumeMaterialStock({
+          productionMaterial: m,
+          material: mat,
+          quantity: actual,
+          transactionType: consumeType,
+          production: editing
         });
       }
 
