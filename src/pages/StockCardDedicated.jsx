@@ -35,6 +35,12 @@ const localDate = (date) => {
 const qty = value => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Number(value) || 0);
 const isoDay = date => new Date(date).toISOString().slice(0, 10);
 const csvCell = value => `"${String(value ?? '').replaceAll('"', '""')}"`;
+const unitLabel = unit => unit === 'mililiter' ? 'ml' : (unit || 'unit');
+const movementUnit = (row, productUnit = 'unit') => (
+  row?.inventory_status === 'BULK' || row?.transaction_type === 'production_output'
+    ? 'ml'
+    : unitLabel(row?.unit || productUnit)
+);
 
 export default function StockCardDedicated() {
   const { toast } = useToast();
@@ -88,21 +94,28 @@ export default function StockCardDedicated() {
   const productBalances = useMemo(() => balances.filter(b => b.item_type === 'product' && b.item_id === productId), [balances, productId]);
   const warehouseStock = useMemo(() => Object.values(productBalances.reduce((acc, b) => {
     const key = b.warehouse_id || b.warehouse_name || 'unknown';
-    if (!acc[key]) acc[key] = { id: key, name: b.warehouse_name || 'Gudang tidak diketahui', quantity: 0 };
+    if (!acc[key]) acc[key] = { id: key, name: b.warehouse_name || 'Gudang tidak diketahui', quantity: 0, units: new Set() };
     acc[key].quantity += Number(b.available_quantity ?? b.quantity ?? 0);
+    acc[key].units.add(b.inventory_status === 'BULK' ? 'ml' : unitLabel(b.unit || product?.unit));
     return acc;
-  }, {})).sort((a, b) => b.quantity - a.quantity), [productBalances]);
+  }, {})).map(row => ({ ...row, unit: row.units.size === 1 ? [...row.units][0] : 'campuran' })).sort((a, b) => b.quantity - a.quantity), [productBalances, product?.unit]);
 
   const totalIn = rows.reduce((sum, row) => sum + Number(row.quantity_in || 0), 0);
   const totalOut = rows.reduce((sum, row) => sum + Number(row.quantity_out || 0), 0);
   const available = productBalances.filter(b => b.inventory_status === 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
   const inProcess = productBalances.filter(b => b.inventory_status && b.inventory_status !== 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
+  const inProcessUnits = new Set(productBalances.filter(b => b.inventory_status && b.inventory_status !== 'READY_FOR_SALE' && Number(b.available_quantity ?? b.quantity ?? 0) !== 0).map(b => b.inventory_status === 'BULK' ? 'ml' : unitLabel(b.unit || product?.unit)));
+  const inProcessUnit = inProcessUnits.size === 1 ? [...inProcessUnits][0] : (inProcessUnits.size > 1 ? 'campuran' : unitLabel(product?.unit));
+  const incomingUnits = new Set(rows.filter(r => Number(r.quantity_in || 0) !== 0).map(r => movementUnit(r, product?.unit)));
+  const outgoingUnits = new Set(rows.filter(r => Number(r.quantity_out || 0) !== 0).map(r => movementUnit(r, product?.unit)));
+  const totalInUnit = incomingUnits.size === 1 ? [...incomingUnits][0] : (incomingUnits.size > 1 ? 'campuran' : unitLabel(product?.unit));
+  const totalOutUnit = outgoingUnits.size === 1 ? [...outgoingUnits][0] : (outgoingUnits.size > 1 ? 'campuran' : unitLabel(product?.unit));
   const opening = rows.length ? Number(rows[rows.length - 1].balance_quantity || 0) - Number(rows[rows.length - 1].quantity_in || 0) + Number(rows[rows.length - 1].quantity_out || 0) : 0;
 
   const flow = FLOW.map(step => {
     const event = rows.find(row => row.transaction_type === step.key);
     const stageQty = productBalances.filter(b => b.inventory_status === step.stage).reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
-    return { ...step, event, quantity: event ? Number(event.quantity_in || 0) : stageQty };
+    return { ...step, event, quantity: event ? Number(event.quantity_in || 0) : stageQty, unit: step.stage === 'BULK' ? 'ml' : unitLabel(event?.unit || product?.unit) };
   });
 
   const switchMode = value => {
@@ -114,7 +127,7 @@ export default function StockCardDedicated() {
     date: localDate(row.transaction_date || row.created_date), number: row.transaction_number || '',
     type: TYPE_LABEL[row.transaction_type] || row.transaction_type, warehouse: row.warehouse_name || '',
     batch: row.batch_number || '', in: row.quantity_in || 0, out: row.quantity_out || 0,
-    balance: row.balance_quantity ?? '', unit: row.unit || product?.unit || '', notes: row.notes || '',
+    balance: row.balance_quantity ?? '', unit: movementUnit(row, product?.unit), notes: row.notes || '',
   }));
 
   const exportCSV = () => {
@@ -144,7 +157,7 @@ export default function StockCardDedicated() {
     { key: 'quantity_in', header: 'Masuk', render: r => r.quantity_in ? <span className="font-semibold text-emerald-600">{qty(r.quantity_in)}</span> : '—' },
     { key: 'quantity_out', header: 'Keluar', render: r => r.quantity_out ? <span className="font-semibold text-red-500">{qty(r.quantity_out)}</span> : '—' },
     { key: 'balance_quantity', header: 'Saldo', render: r => <span className="font-semibold">{qty(r.balance_quantity)}</span> },
-    { key: 'unit', header: 'Satuan' }, { key: 'notes', header: 'Keterangan' },
+    { key: 'unit', header: 'Satuan', render: r => movementUnit(r, product?.unit) }, { key: 'notes', header: 'Keterangan' },
   ];
 
   return <div className="mx-auto max-w-[1500px] space-y-4 p-5">
@@ -153,13 +166,13 @@ export default function StockCardDedicated() {
     <div className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
       <Card><CardContent className="p-4"><Tabs value={mode} onValueChange={switchMode}><TabsList className="mb-4"><TabsTrigger value="product">Berdasarkan Produk</TabsTrigger><TabsTrigger value="recipe">Berdasarkan Recipe</TabsTrigger></TabsList></Tabs><Label className="mb-1.5 text-xs">{mode === 'product' ? 'Pilih Produk' : 'Pilih Recipe'}</Label><SearchableSelect value={selectedId} onValueChange={setSelectedId} options={(mode === 'product' ? products : recipes).map(item => ({ value: item.id, label: item.name, keywords: `${item.code || ''} ${item.sku || ''} ${item.product_name || ''}` }))} placeholder={mode === 'product' ? 'Cari nama produk atau SKU...' : 'Cari recipe...'} className="h-12" /></CardContent></Card>
       <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Ringkasan Cepat</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-3 p-4 pt-2">
-        {[['Stok Tersedia', available, 'text-blue-600 bg-blue-50', Boxes], ['Stok Dalam Proses', inProcess, 'text-amber-600 bg-amber-50', Warehouse], ['Total Masuk', totalIn, 'text-emerald-600 bg-emerald-50', TrendingUp], ['Total Keluar', totalOut, 'text-red-500 bg-red-50', TrendingDown]].map(([label, value, color, Icon]) => <div key={label} className="flex items-center gap-2"><div className={`rounded-full p-2 ${color}`}><Icon className="h-4 w-4"/></div><div><div className="text-[11px] text-muted-foreground">{label}</div><div className={`font-bold ${color.split(' ')[0]}`}>{qty(value)} <span className="text-xs font-normal">{product?.unit || 'unit'}</span></div></div></div>)}
+        {[['Stok Tersedia', available, unitLabel(product?.unit), 'text-blue-600 bg-blue-50', Boxes], ['Stok Dalam Proses', inProcess, inProcessUnit, 'text-amber-600 bg-amber-50', Warehouse], ['Total Masuk', totalIn, totalInUnit, 'text-emerald-600 bg-emerald-50', TrendingUp], ['Total Keluar', totalOut, totalOutUnit, 'text-red-500 bg-red-50', TrendingDown]].map(([label, value, unit, color, Icon]) => <div key={label} className="flex items-center gap-2"><div className={`rounded-full p-2 ${color}`}><Icon className="h-4 w-4"/></div><div><div className="text-[11px] text-muted-foreground">{label}</div><div className={`font-bold ${color.split(' ')[0]}`}>{qty(value)} <span className="text-xs font-normal">{unit}</span></div></div></div>)}
       </CardContent></Card>
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
-      <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Alur Proses (Recipe Flow)</CardTitle></CardHeader><CardContent className="flex min-h-52 items-stretch gap-2 overflow-x-auto p-4 pt-2">{flow.map((step, index) => { const Icon = step.icon; return <React.Fragment key={step.key}><div className="min-w-[125px] flex-1 rounded-lg border bg-slate-50 p-3 text-center"><div className="mx-auto mb-2 w-fit rounded-full bg-white p-2 shadow-sm"><Icon className="h-4 w-4"/></div><div className="text-xs font-semibold">{step.label}</div><div className="mt-1 text-[10px] text-muted-foreground">{step.stage.replaceAll('_', ' ')}</div><div className="mt-4 text-[10px] text-muted-foreground">Output</div><div className="text-sm font-bold text-emerald-600">{qty(step.quantity)} {product?.unit || ''}</div><div className="mt-2 text-[10px] text-muted-foreground">{step.event ? localDate(step.event.transaction_date || step.event.created_date) : 'Belum ada proses'}</div></div>{index < flow.length - 1 && <ArrowRight className="mt-20 h-4 w-4 shrink-0 text-muted-foreground"/>}</React.Fragment>; })}<ArrowRight className="mt-20 h-4 w-4 shrink-0 text-muted-foreground"/><div className="min-w-[125px] flex-1 rounded-lg border border-blue-200 bg-blue-50 p-3 text-center"><div className="mx-auto mb-2 w-fit rounded-full bg-white p-2"><Boxes className="h-4 w-4 text-blue-600"/></div><div className="text-xs font-semibold">Siap Jual</div><div className="mt-1 text-[10px] text-muted-foreground">READY FOR SALE</div><div className="mt-4 text-[10px] text-muted-foreground">Stok Akhir</div><div className="text-sm font-bold text-blue-600">{qty(available)} {product?.unit || ''}</div></div></CardContent></Card>
-      <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Stok Saat Ini (Per Gudang)</CardTitle></CardHeader><CardContent className="space-y-3 p-4 pt-2">{warehouseStock.length ? warehouseStock.map((wh, index) => { const total = warehouseStock.reduce((s, x) => s + x.quantity, 0); const percent = total ? wh.quantity / total * 100 : 0; return <div key={wh.id}><div className="mb-1 flex justify-between text-xs"><span className="font-medium">{wh.name}</span><span>{qty(wh.quantity)} ({percent.toFixed(1)}%)</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${index % 2 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${percent}%` }}/></div></div>; }) : <div className="py-16 text-center text-sm text-muted-foreground">Belum ada stok per gudang</div>}</CardContent></Card>
+      <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Alur Proses (Recipe Flow)</CardTitle></CardHeader><CardContent className="flex min-h-52 items-stretch gap-2 overflow-x-auto p-4 pt-2">{flow.map((step, index) => { const Icon = step.icon; return <React.Fragment key={step.key}><div className="min-w-[125px] flex-1 rounded-lg border bg-slate-50 p-3 text-center"><div className="mx-auto mb-2 w-fit rounded-full bg-white p-2 shadow-sm"><Icon className="h-4 w-4"/></div><div className="text-xs font-semibold">{step.label}</div><div className="mt-1 text-[10px] text-muted-foreground">{step.stage.replaceAll('_', ' ')}</div><div className="mt-4 text-[10px] text-muted-foreground">Output</div><div className="text-sm font-bold text-emerald-600">{qty(step.quantity)} {step.unit}</div><div className="mt-2 text-[10px] text-muted-foreground">{step.event ? localDate(step.event.transaction_date || step.event.created_date) : 'Belum ada proses'}</div></div>{index < flow.length - 1 && <ArrowRight className="mt-20 h-4 w-4 shrink-0 text-muted-foreground"/>}</React.Fragment>; })}<ArrowRight className="mt-20 h-4 w-4 shrink-0 text-muted-foreground"/><div className="min-w-[125px] flex-1 rounded-lg border border-blue-200 bg-blue-50 p-3 text-center"><div className="mx-auto mb-2 w-fit rounded-full bg-white p-2"><Boxes className="h-4 w-4 text-blue-600"/></div><div className="text-xs font-semibold">Siap Jual</div><div className="mt-1 text-[10px] text-muted-foreground">READY FOR SALE</div><div className="mt-4 text-[10px] text-muted-foreground">Stok Akhir</div><div className="text-sm font-bold text-blue-600">{qty(available)} {unitLabel(product?.unit)}</div></div></CardContent></Card>
+      <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Stok Saat Ini (Per Gudang)</CardTitle></CardHeader><CardContent className="space-y-3 p-4 pt-2">{warehouseStock.length ? warehouseStock.map((wh, index) => { const total = warehouseStock.reduce((s, x) => s + x.quantity, 0); const percent = total ? wh.quantity / total * 100 : 0; return <div key={wh.id}><div className="mb-1 flex justify-between text-xs"><span className="font-medium">{wh.name}</span><span>{qty(wh.quantity)} {wh.unit} ({percent.toFixed(1)}%)</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${index % 2 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${percent}%` }}/></div></div>; }) : <div className="py-16 text-center text-sm text-muted-foreground">Belum ada stok per gudang</div>}</CardContent></Card>
     </div>
 
     <Card><CardHeader className="p-4 pb-2"><CardTitle className="text-sm">Pergerakan Stok</CardTitle></CardHeader><CardContent className="p-4 pt-2"><DataTable columns={columns} data={rows} loading={loading} pageSize={20} emptyMessage="Tidak ada pergerakan stok pada periode ini" searchKeys={['transaction_number','reference_type','warehouse_name','batch_number','notes']} searchPlaceholder="Cari no. transaksi / gudang / batch / keterangan..."/></CardContent></Card>
