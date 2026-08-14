@@ -17,6 +17,7 @@ import Sales from '@/pages/Sales';
 import Purchases from '@/pages/Purchases';
 import Payments from '@/pages/Payments';
 import StockCard from '@/pages/StockCard';
+import StockCardDedicated from '@/pages/StockCardDedicated';
 import SalesReport from '@/pages/SalesReport';
 import ReceivablesReport from '@/pages/ReceivablesReport';
 import InventoryReport from '@/pages/InventoryReport';
@@ -86,6 +87,7 @@ const AuthenticatedApp = () => {
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/payments" element={<Payments />} />
           <Route path="/stock-card" element={<StockCard />} />
+          <Route path="/stock-card-dedicated" element={<StockCardDedicated />} />
 
           {/* Biaya Operasional */}
           <Route

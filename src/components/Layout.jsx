@@ -4,7 +4,7 @@ import { base44 } from '@/api/base44Client';
 import {
   LayoutDashboard, FlaskConical, Factory, Package, Tag, Stamp,
   ShoppingCart, Wallet, ClipboardList, FileBarChart, Database,
-  Settings, ChevronDown, Menu, X, LogOut, Bell, Search, Calculator, Bot, Boxes, TrendingUp, AlertTriangle
+  Settings, ChevronDown, Menu, X, LogOut, Bell, Search, Calculator, Boxes, TrendingUp, AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FloatingAssistant from '@/components/FloatingAssistant';
@@ -23,6 +23,7 @@ const menuItems = [
   { label: 'Penjualan', icon: ShoppingCart, path: '/sales', group: 'operasional', perm: 'sales' },
   { label: 'Pembayaran Piutang', icon: Wallet, path: '/payments', group: 'operasional', perm: 'payments' },
   { label: 'Kartu Stok', icon: ClipboardList, path: '/stock-card', group: 'operasional', perm: 'stock_card' },
+  { label: 'Stock Card Dedicated', icon: ClipboardList, path: '/stock-card-dedicated', group: 'operasional', perm: 'stock_card' },
   { label: 'Biaya Operasional', icon: AlertTriangle, path: '/operationalCost', group: 'operasional', perm: 'operational_cost' },
   { label: 'Laporan Penjualan', icon: FileBarChart, path: '/reports/sales', group: 'laporan', perm: 'report_sales' },
   { label: 'Laporan Piutang', icon: FileBarChart, path: '/reports/receivables', group: 'laporan', perm: 'report_receivables' },
@@ -73,7 +74,7 @@ export default function Layout() {
         onClick={() => setSidebarOpen(false)}
         className={cn(
           'flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium transition-colors',
-          isActive(item.path)
+          (item.path === '/stock-card' ? location.pathname === item.path : isActive(item.path))
             ? 'bg-primary text-primary-foreground'
             : 'text-sidebar-foreground hover:bg-sidebar-accent'
         )}
