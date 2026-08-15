@@ -72,10 +72,13 @@ export default function StockCardDedicated() {
     setLoading(true);
     try {
       const [productRows, recipeRows, productionRows, materialRows, mappingRows, ledgerRows, balanceRows] = await Promise.all([
-        base44.entities.Product.filter({ is_active: true }),
-        base44.entities.Recipe.filter({ status: 'approved' }).catch(() => []),
-        base44.entities.ProductionOrder.list('-production_date', 2000),
-        base44.entities.Material.filter({ is_active: true }),
+        // TRACEABILITY:
+        // gunakan seluruh master historis, termasuk item inactive,
+        // supaya transaksi lama tetap dapat ditelusuri.
+        base44.entities.Product.list('-created_date', 3000),
+        base44.entities.Recipe.list('-created_date', 2000).catch(() => []),
+        base44.entities.ProductionOrder.list('-production_date', 3000),
+        base44.entities.Material.list('-created_date', 5000),
         base44.entities.ProductComponentMapping.filter({ is_active: true }).catch(() => []),
         base44.entities.StockLedger.list('-transaction_date', 5000),
         base44.entities.StockBalance.list('-updated_date', 3000),
@@ -110,36 +113,83 @@ export default function StockCardDedicated() {
     .filter(row => row.inventory_status === stage)
     .reduce((sum, row) => sum + Number(row.quantity_in || 0) - Number(row.quantity_out || 0), 0), []);
   const eligibleBatchOrders = useMemo(() => productionOrders.filter(order => {
-    const status = String(order.status || '').toLowerCase();
-    const isCancelled = ['dibatalkan', 'cancelled', 'canceled', 'void', 'voided'].includes(status);
-    const isPremix = order.production_type === 'PREMIX' || order.recipe_type === 'PREMIX';
-    if (isCancelled || isPremix || !order.product_id || !order.batch_number) return false;
+    const isPremix =
+      order.production_type === 'PREMIX' ||
+      order.recipe_type === 'PREMIX';
 
-    const history = ledgerUntilDate(order);
-    return ['BULK', 'READY_FOR_LABELING', 'UNEXCISED', 'READY_FOR_SALE']
-      .some(stage => stageBalanceFromRows(history, stage) > 0.000001);
-  }), [productionOrders, ledgerUntilDate, stageBalanceFromRows]);
+    if (
+      isPremix ||
+      !order.product_id ||
+      !order.batch_number
+    ) {
+      return false;
+    }
+
+    /*
+     * TRACEABILITY RULE:
+     *
+     * Batch tetap muncul walaupun:
+     * - stok seluruh stage sudah 0
+     * - batch sudah selesai
+     * - batch pernah di-VOID / reversal
+     *
+     * Syaratnya batch tersebut memang pernah mempunyai StockLedger.
+     * Dengan ini batch lama tetap dapat dipakai untuk investigasi
+     * miss mixing / complaint / traceability.
+     */
+    return ledgerUntilDate(order).length > 0;
+  }), [productionOrders, ledgerUntilDate]);
   const readyForSaleItems = useMemo(() => balances
     .filter(b =>
       b.item_type === 'product' &&
-      b.inventory_status === 'READY_FOR_SALE' &&
-      Number(b.available_quantity ?? b.quantity ?? 0) > 0
+      b.inventory_status === 'READY_FOR_SALE'
     )
     .map(b => {
-      const product = products.find(p => p.id === b.item_id);
+      const productRow = products.find(p => p.id === b.item_id);
       return {
         ...b,
-        id: b.id,
-        name: product?.name || b.item_name || 'Produk',
-        code: product?.code || product?.sku || b.item_code || '',
+        name: productRow?.name || b.item_name || 'Produk',
+        code: productRow?.code || productRow?.sku || b.item_code || '',
         product_id: b.item_id,
-        product_name: product?.name || b.item_name || 'Produk',
+        product_name: productRow?.name || b.item_name || 'Produk',
       };
     })
     .sort((a, b) =>
       String(a.product_name || '').localeCompare(String(b.product_name || '')) ||
-      String(a.batch_number || '').localeCompare(String(b.batch_number || ''))
+      String(a.batch_number || '').localeCompare(String(b.batch_number || '')) ||
+      String(a.warehouse_name || '').localeCompare(String(b.warehouse_name || ''))
     ), [balances, products]);
+
+  const batchCurrentQty = useMemo(() => {
+    const map = {};
+
+    for (const order of eligibleBatchOrders) {
+      const currentRows = balances.filter(b =>
+        b.item_type === 'product' &&
+        (
+          (b.batch_number || '') === (order.batch_number || '') ||
+          (
+            b.batch_id &&
+            order.batch_id &&
+            b.batch_id === order.batch_id
+          )
+        )
+      );
+
+      map[order.id] = currentRows.reduce(
+        (sum, row) =>
+          sum +
+          Number(
+            row.available_quantity ??
+            row.quantity ??
+            0
+          ),
+        0
+      );
+    }
+
+    return map;
+  }, [eligibleBatchOrders, balances]);
 
   const modeItems = useMemo(() => {
     if (mode === 'batch') return eligibleBatchOrders;
@@ -161,7 +211,7 @@ export default function StockCardDedicated() {
   const product = products.find(p => p.id === productId);
   const selectedRecipeForProduct = recipes.find(r => r.id === selectedBatch?.recipe_id) || recipes.find(r => r.product_id === productId && r.status === 'approved');
   const selectedItem = mode === 'batch' || mode === 'ready_for_sale' ? product : selectedMaterial;
-  const selectedUnit = unitLabel((mode === 'batch' || mode === 'ready_for_sale') ? product?.unit : selectedMaterial?.unit);
+  const selectedUnit = unitLabel((mode === 'batch' || mode === 'ready_for_sale') ? (selectedReadyStock?.unit || product?.unit) : selectedMaterial?.unit);
 
   // Ambil seluruh histori item/batch sampai dateTo terlebih dahulu.
   // Running balance TIDAK boleh bergantung pada balance_quantity StockLedger,
@@ -171,17 +221,31 @@ export default function StockCardDedicated() {
       if (mode === 'batch') {
         return row.item_type === 'product' && row.batch_number === selectedBatch?.batch_number;
       }
+
       if (mode === 'ready_for_sale') {
         if (row.item_type !== 'product') return false;
-        if (row.item_id !== selectedReadyStock?.item_id) return false;
         if (row.inventory_status !== 'READY_FOR_SALE') return false;
-        if (selectedReadyStock?.batch_id && row.batch_id !== selectedReadyStock.batch_id) return false;
-        if (!selectedReadyStock?.batch_id && selectedReadyStock?.batch_number &&
-            (row.batch_number || '') !== (selectedReadyStock.batch_number || '')) return false;
-        if (selectedReadyStock?.warehouse_id &&
-            (row.warehouse_id || '') !== (selectedReadyStock.warehouse_id || '')) return false;
+        if (row.item_id !== selectedReadyStock?.item_id) return false;
+
+        if (
+          selectedReadyStock?.batch_id &&
+          (row.batch_id || '') !== (selectedReadyStock.batch_id || '')
+        ) return false;
+
+        if (
+          !selectedReadyStock?.batch_id &&
+          selectedReadyStock?.batch_number &&
+          (row.batch_number || '') !== (selectedReadyStock.batch_number || '')
+        ) return false;
+
+        if (
+          selectedReadyStock?.warehouse_id &&
+          (row.warehouse_id || '') !== (selectedReadyStock.warehouse_id || '')
+        ) return false;
+
         return true;
       }
+
       return row.item_type === 'material' && row.item_id === selectedId;
     })
     .filter(row => {
@@ -189,7 +253,17 @@ export default function StockCardDedicated() {
       return !dateTo || day <= dateTo;
     })
     .sort((a, b) => String(a.transaction_date || a.created_date).localeCompare(String(b.transaction_date || b.created_date))),
-  [ledger, mode, selectedId, selectedBatch?.batch_number, selectedReadyStock?.item_id, selectedReadyStock?.batch_id, selectedReadyStock?.batch_number, selectedReadyStock?.warehouse_id, dateTo]);
+  [
+    ledger,
+    mode,
+    selectedId,
+    selectedBatch?.batch_number,
+    selectedReadyStock?.item_id,
+    selectedReadyStock?.batch_id,
+    selectedReadyStock?.batch_number,
+    selectedReadyStock?.warehouse_id,
+    dateTo,
+  ]);
 
   const historyWithRunningBalance = useMemo(() => {
     const running = {};
@@ -232,22 +306,38 @@ export default function StockCardDedicated() {
     acc[key].quantity += Number(row.quantity_in || 0) - Number(row.quantity_out || 0);
     acc[key].available_quantity = acc[key].quantity;
     return acc;
-  }, {})).filter(row => Math.abs(row.quantity) > 0.000001), [batchHistoryRows]);
+  }, {})), [batchHistoryRows]);
   const selectedBalances = useMemo(() => {
-    if (mode === 'batch') return historicalBatchBalances;
+    if (mode === 'batch') {
+      return historicalBatchBalances;
+    }
+
     if (mode === 'ready_for_sale') {
       return balances.filter(b => {
         if (b.item_type !== 'product') return false;
         if (b.inventory_status !== 'READY_FOR_SALE') return false;
         if (b.item_id !== selectedReadyStock?.item_id) return false;
-        if (selectedReadyStock?.batch_id && b.batch_id !== selectedReadyStock.batch_id) return false;
-        if (!selectedReadyStock?.batch_id && selectedReadyStock?.batch_number &&
-            (b.batch_number || '') !== (selectedReadyStock.batch_number || '')) return false;
-        if (selectedReadyStock?.warehouse_id &&
-            (b.warehouse_id || '') !== (selectedReadyStock.warehouse_id || '')) return false;
+
+        if (
+          selectedReadyStock?.batch_id &&
+          (b.batch_id || '') !== (selectedReadyStock.batch_id || '')
+        ) return false;
+
+        if (
+          !selectedReadyStock?.batch_id &&
+          selectedReadyStock?.batch_number &&
+          (b.batch_number || '') !== (selectedReadyStock.batch_number || '')
+        ) return false;
+
+        if (
+          selectedReadyStock?.warehouse_id &&
+          (b.warehouse_id || '') !== (selectedReadyStock.warehouse_id || '')
+        ) return false;
+
         return true;
       });
     }
+
     return balances.filter(b => b.item_type === 'material' && b.item_id === selectedId);
   }, [balances, mode, selectedId, selectedReadyStock, historicalBatchBalances]);
   const warehouseStock = useMemo(() => Object.values(selectedBalances.reduce((acc, b) => {
@@ -260,9 +350,7 @@ export default function StockCardDedicated() {
 
   const totalIn = rows.reduce((sum, row) => sum + Number(row.quantity_in || 0), 0);
   const totalOut = rows.reduce((sum, row) => sum + Number(row.quantity_out || 0), 0);
-  const available = mode === 'batch'
-    ? selectedBalances.filter(b => b.inventory_status === 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0)
-    : selectedBalances.reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
+  const available = mode === 'batch' ? selectedBalances.filter(b => b.inventory_status === 'READY_FOR_SALE').reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0) : selectedBalances.reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0);
   const inProcess = mode === 'batch' ? selectedBalances.filter(b => ['READY_FOR_LABELING', 'UNEXCISED'].includes(b.inventory_status)).reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0) : 0;
   const inProcessUnits = new Set(selectedBalances.filter(b => ['READY_FOR_LABELING', 'UNEXCISED'].includes(b.inventory_status) && Number(b.available_quantity ?? b.quantity ?? 0) !== 0).map(b => unitLabel(b.unit || selectedUnit)));
   const inProcessUnit = inProcessUnits.size === 1 ? [...inProcessUnits][0] : (inProcessUnits.size > 1 ? 'campuran' : selectedUnit);
@@ -286,8 +374,8 @@ export default function StockCardDedicated() {
     batchHistoryRows.filter(row => ['sales_reversal', 'sales_return'].includes(row.transaction_type)).reduce((sum, row) => sum + Number(row.quantity_in || 0), 0);
   const quickTotalIn = mode === 'batch' ? Math.max(0, bottlingIn) : totalIn;
   const quickTotalOut = mode === 'batch' ? Math.max(0, salesOut) : totalOut;
-  const quickTotalInUnit = (mode === 'batch' || mode === 'ready_for_sale') ? unitLabel(product?.unit) : totalInUnit;
-  const quickTotalOutUnit = (mode === 'batch' || mode === 'ready_for_sale') ? unitLabel(product?.unit) : totalOutUnit;
+  const quickTotalInUnit = (mode === 'batch' || mode === 'ready_for_sale') ? selectedUnit : totalInUnit;
+  const quickTotalOutUnit = (mode === 'batch' || mode === 'ready_for_sale') ? selectedUnit : totalOutUnit;
 
   const flow = FLOW.map(step => {
     const outputRows = batchHistoryRows.filter(row => row.transaction_type === step.key);
@@ -321,14 +409,14 @@ export default function StockCardDedicated() {
     const body = exportRows.map(r => Object.values(r).map(csvCell).join(','));
     const blob = new Blob(['\ufeff' + [headers.map(csvCell).join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url;
-    link.download = `stock-card-${selectedItem?.code || selectedBatch?.batch_number || 'item'}-${dateFrom}-${dateTo}.csv`; link.click(); URL.revokeObjectURL(url);
+    link.download = `stock-card-${selectedItem?.code || selectedReadyStock?.batch_number || selectedBatch?.batch_number || 'item'}-${dateFrom}-${dateTo}.csv`; link.click(); URL.revokeObjectURL(url);
   };
   const exportPDF = () => exportReportToPDF({
     title: 'Stock Card Dedicated',
     subtitle: mode === 'batch'
       ? `${selectedBatch?.batch_number || 'Batch belum dipilih'} · ${product?.name || ''}`
       : mode === 'ready_for_sale'
-        ? `${product?.name || 'Produk siap jual'}${selectedReadyStock?.batch_number ? ` · ${selectedReadyStock.batch_number}` : ''}${selectedReadyStock?.warehouse_name ? ` · ${selectedReadyStock.warehouse_name}` : ''}`
+        ? `${product?.name || 'Produk siap jual'}${selectedReadyStock?.batch_number ? ` · ${selectedReadyStock.batch_number}` : ' · TANPA BATCH'}${selectedReadyStock?.warehouse_name ? ` · ${selectedReadyStock.warehouse_name}` : ''}`
         : (selectedMaterial?.name || 'Bahan belum dipilih'),
     fileName: `stock-card-${selectedItem?.code || selectedReadyStock?.batch_number || selectedBatch?.batch_number || 'item'}.pdf`,
     meta: { period: `${dateFrom} s/d ${dateTo}` }, rows: exportRows,
@@ -353,16 +441,20 @@ export default function StockCardDedicated() {
   ];
 
   return <div className="mx-auto max-w-[1500px] space-y-4 p-5">
-    <PageHeader title="Kartu Stok Detail" description="Telusuri stok berdasarkan batch produksi, essence, botol, box, atau label" actions={<div className="flex flex-wrap items-center gap-2"><div className="flex items-center gap-2 rounded-md border bg-white px-2 py-1"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/><span className="text-muted-foreground">–</span><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/></div><Button variant="outline" size="sm" onClick={exportCSV} className="gap-1.5"><Download className="h-4 w-4"/>Export CSV</Button><PdfButton onExport={exportPDF} perm="stock_card_detail" /></div>} />
+    <PageHeader title="Kartu Stok Detail" description="Traceability historis per batch, produk siap jual, essence, botol, box, dan label — termasuk stok yang sudah 0" actions={<div className="flex flex-wrap items-center gap-2"><div className="flex items-center gap-2 rounded-md border bg-white px-2 py-1"><Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/><span className="text-muted-foreground">–</span><Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-7 w-[132px] border-0 p-1 text-xs"/></div><Button variant="outline" size="sm" onClick={exportCSV} className="gap-1.5"><Download className="h-4 w-4"/>Export CSV</Button><PdfButton onExport={exportPDF} perm="stock_card_detail" /></div>} />
 
     <div className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
       <Card><CardContent className="p-4"><Tabs value={mode} onValueChange={switchMode}><TabsList className="mb-4 grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-3 xl:grid-cols-6"><TabsTrigger value="batch">Batch Produksi</TabsTrigger><TabsTrigger value="ready_for_sale">Siap Jual</TabsTrigger><TabsTrigger value="essence">Bahan Essence</TabsTrigger><TabsTrigger value="bottle">Bahan Botol</TabsTrigger><TabsTrigger value="box">Bahan Box</TabsTrigger><TabsTrigger value="label">Bahan Label</TabsTrigger></TabsList></Tabs><Label className="mb-1.5 text-xs">Pilih {MODE_LABEL[mode]}</Label><SearchableSelect value={selectedId} onValueChange={setSelectedId} options={modeItems.map(item => ({
         value: item.id,
         label: mode === 'batch'
-          ? `${item.batch_number || item.production_number} · ${item.product_name || 'Tanpa produk'}`
+          ? `${item.batch_number || item.production_number} · ${item.product_name || 'Tanpa produk'}${Number(batchCurrentQty[item.id] || 0) <= 0 ? ' · HABIS / HISTORIS' : ` · ${qty(batchCurrentQty[item.id])} unit`}`
           : mode === 'ready_for_sale'
-            ? `${item.product_name || item.name}${item.batch_number ? ` · ${item.batch_number}` : ' · TANPA BATCH'} · ${qty(item.available_quantity ?? item.quantity)} ${unitLabel(item.unit || product?.unit)}${item.warehouse_name ? ` · ${item.warehouse_name}` : ''}`
-            : item.name,
+            ? `${item.product_name || item.name}${item.batch_number ? ` · ${item.batch_number}` : ' · TANPA BATCH'} · ${qty(item.available_quantity ?? item.quantity)} ${unitLabel(item.unit || product?.unit)}${Number(item.available_quantity ?? item.quantity ?? 0) <= 0 ? ' · HABIS / HISTORIS' : ''}${item.warehouse_name ? ` · ${item.warehouse_name}` : ''}`
+            : `${item.name}${Number(
+                balances
+                  .filter(b => b.item_type === 'material' && b.item_id === item.id)
+                  .reduce((sum, b) => sum + Number(b.available_quantity ?? b.quantity ?? 0), 0)
+              ) <= 0 ? ' · HABIS / HISTORIS' : ''}`,
         keywords: mode === 'batch'
           ? `${item.batch_number || ''} ${item.production_number || ''} ${item.product_name || ''} ${item.recipe_code || ''}`
           : mode === 'ready_for_sale'
