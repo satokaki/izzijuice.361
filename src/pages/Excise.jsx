@@ -15,7 +15,7 @@ import { Switch } from '@/components/ui/switch';
 import NumberInput from '@/components/NumberInput';
 import PdfButton from '@/components/PdfButton';
 import { exportDocumentToPDF } from '@/lib/pdfExport';
-import { Plus } from 'lucide-react';
+import { Plus, Eye, X } from 'lucide-react';
 import { generateOrderNumber } from '@/lib/sequence';
 import { recordStockMovement, getAllStockBalances, createAuditLog } from '@/lib/stockUtils';
 import { getInventoryDisplayName } from '@/lib/inventoryDisplay';
@@ -32,6 +32,8 @@ export default function Excise() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewOrder, setViewOrder] = useState(null);
 
   const [form, setForm] = useState({
     product_id: '',
@@ -671,6 +673,16 @@ export default function Excise() {
     }
   };
 
+  const openView = (row) => {
+    setViewOrder(row);
+    setViewOpen(true);
+  };
+
+  const closeView = () => {
+    setViewOpen(false);
+    setViewOrder(null);
+  };
+
   const columns = [
     {
       key: 'excise_number',
@@ -752,18 +764,30 @@ export default function Excise() {
     },
     {
       key: 'actions',
-      header: '',
-      width: '56px',
+      header: 'Aksi',
+      width: '96px',
       render:
-        row =>
-          <PdfButton
-            onExport={() =>
-              exportExcisePDF(row)
-            }
-            perm="excise"
-            iconOnly
-            label="Cetak Dokumen"
-          />
+        row => (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => openView(row)}
+              title="Lihat Detail"
+              className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+            </button>
+
+            <PdfButton
+              onExport={() =>
+                exportExcisePDF(row)
+              }
+              perm="excise"
+              iconOnly
+              label="Cetak Dokumen"
+            />
+          </div>
+        )
     },
   ];
 
@@ -796,6 +820,121 @@ export default function Excise() {
         ]}
         searchPlaceholder="Cari proses cukai..."
       />
+
+      {viewOpen && viewOrder && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={closeView}
+        >
+          <div
+            className="bg-white w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between z-10">
+              <div>
+                <h2 className="text-base font-semibold">Detail Proses Cukai</h2>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {viewOrder.excise_number || '—'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeView}
+                className="p-2 rounded-md hover:bg-muted"
+                title="Tutup"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] text-muted-foreground uppercase">Status</div>
+                  <div className="mt-1">
+                    <StatusBadge status={viewOrder.status} />
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[11px] text-muted-foreground uppercase">Tanggal</div>
+                  <div className="text-sm font-medium mt-1">
+                    {viewOrder.excise_date || '—'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">No. Cukai</div>
+                  <div className="font-mono font-medium mt-1">{viewOrder.excise_number || '—'}</div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Batch</div>
+                  <div className="font-mono font-medium mt-1">{viewOrder.batch_number || '—'}</div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Produk</div>
+                  <div className="font-medium mt-1">{viewOrder.product_name || '—'}</div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Merk</div>
+                  <div className="font-medium mt-1">{viewOrder.brand_name || '—'}</div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Ukuran Botol</div>
+                  <div className="font-medium mt-1">
+                    {viewOrder.bottle_size ? `${viewOrder.bottle_size} ml` : '—'}
+                  </div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Jumlah</div>
+                  <div className="font-semibold tabular-nums mt-1">{viewOrder.quantity || 0} unit</div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Pita Cukai</div>
+                  <div className="font-medium mt-1">
+                    {viewOrder.excise_material_name || viewOrder.excise_label_type || '—'}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-1">
+                    Total: {viewOrder.excise_total_required || 0}
+                  </div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Box</div>
+                  <div className="font-medium mt-1">
+                    {viewOrder.use_box ? (viewOrder.box_material_name || '—') : 'Tanpa Box'}
+                  </div>
+                  {viewOrder.use_box && (
+                    <div className="text-[11px] text-muted-foreground mt-1">
+                      Total: {viewOrder.box_total_required || 0}
+                    </div>
+                  )}
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">No. Dokumen</div>
+                  <div className="font-medium mt-1">{viewOrder.document_number || '—'}</div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground">Ref. Cukai</div>
+                  <div className="font-medium mt-1">{viewOrder.excise_reference_number || '—'}</div>
+                </div>
+                <div className="border rounded-lg p-3 sm:col-span-2">
+                  <div className="text-[11px] text-muted-foreground">Operator</div>
+                  <div className="font-medium mt-1">{viewOrder.operator || '—'}</div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-semibold mb-2">Catatan</div>
+                <div className="border rounded-lg px-3 py-3 text-sm whitespace-pre-wrap min-h-[48px]">
+                  {viewOrder.notes || '—'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <FormModal
         open={modalOpen}
