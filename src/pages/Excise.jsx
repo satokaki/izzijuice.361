@@ -20,12 +20,35 @@ import { generateOrderNumber } from '@/lib/sequence';
 import { recordStockMovement, getAllStockBalances, createAuditLog } from '@/lib/stockUtils';
 import { getInventoryDisplayName } from '@/lib/inventoryDisplay';
 
+
+const normalizeWarehouseName = value =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s_-]+/g, '');
+
+const findWarehouseByAliases = (warehouses, aliases) => {
+  const wanted = new Set(
+    aliases.map(normalizeWarehouseName)
+  );
+
+  return (warehouses || []).find(
+    warehouse =>
+      wanted.has(
+        normalizeWarehouseName(
+          warehouse?.name
+        )
+      )
+  ) || null;
+};
+
 export default function Excise() {
   const { toast } = useToast();
   const [data, setData] = useState([]);
   const [belumCukaiStock, setBelumCukaiStock] = useState([]);
   const [products, setProducts] = useState([]);
   const [brands, setBrands] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [exciseMaterials, setExciseMaterials] = useState([]);
   const [boxMaterials, setBoxMaterials] = useState([]);
   const [exciseStocks, setExciseStocks] = useState({});
@@ -60,7 +83,7 @@ export default function Excise() {
     setLoading(true);
 
     try {
-      const [items, balances, prods, brs, mats, matBal, boxMats] = await Promise.all([
+      const [items, balances, prods, brs, mats, matBal, boxMats, whs] = await Promise.all([
         base44.entities.ExciseOrder.list('-created_date', 100),
         getAllStockBalances('product'),
         base44.entities.Product.filter({ is_active: true }),
@@ -76,6 +99,7 @@ export default function Excise() {
           '-created_date',
           500
         ),
+        base44.entities.Warehouse.filter({ is_active: true }),
       ]);
 
       setData(items);
@@ -88,6 +112,7 @@ export default function Excise() {
       );
       setProducts(prods);
       setBrands(brs);
+      setWarehouses(whs || []);
       setExciseMaterials(mats);
       setBoxMaterials(boxMats);
 
@@ -282,6 +307,25 @@ export default function Excise() {
         );
       }
 
+      /*
+       * WAREHOUSE RULE
+       *
+       * Cukai:
+       * consume UNEXCISED dari warehouse sumber (SIAP CUKAI)
+       * lalu output READY_FOR_SALE ke warehouse SIAP JUAL.
+       */
+      const readyForSaleWarehouse =
+        findWarehouseByAliases(
+          warehouses,
+          ['SIAP JUAL', 'GUDANG SIAP JUAL']
+        );
+
+      if (!readyForSaleWarehouse) {
+        throw new Error(
+          'Gudang SIAP JUAL tidak ditemukan. Periksa Master Gudang.'
+        );
+      }
+
       const brand =
         brands.find(b => b.id === product.brand_id);
 
@@ -395,6 +439,8 @@ export default function Excise() {
         item_code: product.code || '',
         batch_id: stockItem.batch_id || '',
         batch_number: stockItem.batch_number || '',
+        warehouse_id: stockItem.warehouse_id || '',
+        warehouse_name: stockItem.warehouse_name || '',
         inventory_status: 'UNEXCISED',
         quantity_out: quantityProcessed,
         unit: 'unit',
@@ -520,6 +566,8 @@ export default function Excise() {
         item_code: product.code || '',
         batch_id: stockItem.batch_id || '',
         batch_number: stockItem.batch_number || '',
+        warehouse_id: readyForSaleWarehouse.id,
+        warehouse_name: readyForSaleWarehouse.name || '',
         inventory_status: 'READY_FOR_SALE',
         quantity_in: quantityProcessed,
         unit: 'unit',
