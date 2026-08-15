@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/select';
 import NumberInput from '@/components/NumberInput';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Ban } from 'lucide-react';
+import { Plus, Ban, Eye, X } from 'lucide-react';
 import { generateOrderNumber } from '@/lib/sequence';
 import {
   recordStockMovement,
@@ -70,6 +70,17 @@ export default function Labeling() {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [voidingId, setVoidingId] = useState('');
+
+  /*
+   * =========================================================
+   * VIEW LABELING DETAIL
+   * NON-DATA-AFFECTING / READ ONLY
+   * =========================================================
+   */
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewOrder, setViewOrder] = useState(null);
+  const [viewMaterials, setViewMaterials] = useState([]);
+  const [viewLoading, setViewLoading] = useState(false);
 
   const [form, setForm] = useState(emptyForm());
   const [labelSearch, setLabelSearch] = useState('');
@@ -2031,6 +2042,46 @@ export default function Labeling() {
 
   /*
    * =========================================================
+   * VIEW LABELING DETAIL
+   * READ ONLY — DOES NOT TOUCH STOCK / LEDGER
+   * =========================================================
+   */
+  const openView = async order => {
+    if (!order?.id) return;
+
+    setViewOrder(order);
+    setViewMaterials([]);
+    setViewOpen(true);
+    setViewLoading(true);
+
+    try {
+      const materials =
+        await base44.entities.LabelingMaterial.filter({
+          labeling_id: order.id,
+        });
+
+      setViewMaterials(materials || []);
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Gagal memuat detail labeling',
+        description:
+          error?.message ||
+          'Detail label / stiker tidak dapat dimuat',
+      });
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
+  const closeView = () => {
+    setViewOpen(false);
+    setViewOrder(null);
+    setViewMaterials([]);
+  };
+
+  /*
+   * =========================================================
    * TABLE
    * =========================================================
    */
@@ -2133,7 +2184,7 @@ export default function Labeling() {
 
     /*
      * =======================================================
-     * VOID ACTION
+     * VIEW + VOID ACTION
      * =======================================================
      */
 
@@ -2145,7 +2196,7 @@ export default function Labeling() {
         'Aksi',
 
       width:
-        '70px',
+        '100px',
 
       render:
         row => {
@@ -2156,30 +2207,46 @@ export default function Labeling() {
             voidingId === row.id;
 
           return (
-            <button
-              type="button"
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
 
-              onClick={() =>
-                voidLabeling(row)
-              }
+                onClick={() =>
+                  openView(row)
+                }
 
-              disabled={
-                isVoid ||
-                isVoiding ||
-                submitting ||
-                !!voidingId
-              }
+                title="Lihat Detail"
 
-              title={
-                isVoid
-                  ? 'Sudah VOID'
-                  : 'VOID Labeling'
-              }
+                className="p-1.5 rounded hover:bg-blue-50 text-blue-600 transition-colors"
+              >
+                <Eye className="w-4 h-4" />
+              </button>
 
-              className="p-1.5 rounded hover:bg-red-50 text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <Ban className="w-4 h-4" />
-            </button>
+              <button
+                type="button"
+
+                onClick={() =>
+                  voidLabeling(row)
+                }
+
+                disabled={
+                  isVoid ||
+                  isVoiding ||
+                  submitting ||
+                  !!voidingId
+                }
+
+                title={
+                  isVoid
+                    ? 'Sudah VOID'
+                    : 'VOID Labeling'
+                }
+
+                className="p-1.5 rounded hover:bg-red-50 text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Ban className="w-4 h-4" />
+              </button>
+            </div>
           );
         },
     },
@@ -2237,6 +2304,224 @@ export default function Labeling() {
 
         searchPlaceholder="Cari labeling..."
       />
+
+      {/* =====================================================
+          VIEW LABELING DETAIL — READ ONLY
+         ===================================================== */}
+      {viewOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={closeView}
+        >
+          <div
+            className="bg-white w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl shadow-xl"
+            onClick={event =>
+              event.stopPropagation()
+            }
+          >
+            <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between z-10">
+              <div>
+                <h2 className="text-base font-semibold">
+                  Detail Labeling
+                </h2>
+
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {viewOrder?.labeling_number || '—'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeView}
+                className="p-2 rounded-md hover:bg-muted"
+                title="Tutup"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {viewOrder && (
+              <div className="p-5 space-y-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] text-muted-foreground uppercase">
+                      Status
+                    </div>
+
+                    <div className="mt-1">
+                      <StatusBadge
+                        status={viewOrder.status}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <div className="text-[11px] text-muted-foreground uppercase">
+                      Tanggal
+                    </div>
+
+                    <div className="text-sm font-medium mt-1">
+                      {viewOrder.labeling_date || '—'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      No. Labeling
+                    </div>
+
+                    <div className="font-mono font-medium mt-1">
+                      {viewOrder.labeling_number || '—'}
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Batch
+                    </div>
+
+                    <div className="font-mono font-medium mt-1">
+                      {viewOrder.batch_number || '—'}
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Produk Hasil
+                    </div>
+
+                    <div className="font-medium mt-1">
+                      {viewOrder.product_name || '—'}
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Merk Hasil
+                    </div>
+
+                    <div className="font-medium mt-1">
+                      {viewOrder.brand_name || '—'}
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Bottle Size
+                    </div>
+
+                    <div className="font-medium mt-1">
+                      {viewOrder.bottle_size
+                        ? `${viewOrder.bottle_size} ml`
+                        : '—'}
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Jumlah
+                    </div>
+
+                    <div className="font-semibold tabular-nums mt-1">
+                      {viewOrder.quantity || 0} unit
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Operator
+                    </div>
+
+                    <div className="font-medium mt-1">
+                      {viewOrder.operator || '—'}
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Label Utama
+                    </div>
+
+                    <div className="font-medium mt-1">
+                      {viewOrder.label_item_name ||
+                        viewOrder.label_type ||
+                        '—'}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-sm font-semibold mb-2">
+                    Label / Stiker Digunakan
+                  </div>
+
+                  {viewLoading ? (
+                    <div className="border rounded-lg px-4 py-5 text-sm text-muted-foreground">
+                      Memuat detail label...
+                    </div>
+                  ) : viewMaterials.length === 0 ? (
+                    <div className="border rounded-lg px-4 py-5 text-sm text-muted-foreground">
+                      Tidak ada detail label/stiker.
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="grid grid-cols-[1fr_80px_100px] gap-2 px-3 py-2 bg-muted/40 text-[11px] font-medium text-muted-foreground">
+                        <div>Label / Stiker</div>
+                        <div className="text-right">
+                          Per Unit
+                        </div>
+                        <div className="text-right">
+                          Total
+                        </div>
+                      </div>
+
+                      {viewMaterials.map(material => (
+                        <div
+                          key={material.id}
+                          className="grid grid-cols-[1fr_80px_100px] gap-2 px-3 py-2.5 border-t text-sm"
+                        >
+                          <div>
+                            <div className="font-medium">
+                              {material.label_item_name || '—'}
+                            </div>
+
+                            {material.label_item_code && (
+                              <div className="text-[11px] text-muted-foreground">
+                                {material.label_item_code}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="text-right tabular-nums">
+                            {material.quantity_per_unit || 0}
+                          </div>
+
+                          <div className="text-right tabular-nums font-medium">
+                            {material.total_quantity_required || 0}{' '}
+                            {material.unit || 'unit'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-sm font-semibold mb-2">
+                    Catatan
+                  </div>
+
+                  <div className="border rounded-lg px-3 py-3 text-sm whitespace-pre-wrap min-h-[48px]">
+                    {viewOrder.notes || '—'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <FormModal
         open={
