@@ -27,6 +27,28 @@ import {
 } from '@/lib/stockUtils';
 import { getInventoryDisplayName } from '@/lib/inventoryDisplay';
 
+
+const normalizeWarehouseName = value =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s_-]+/g, '');
+
+const findWarehouseByAliases = (warehouses, aliases) => {
+  const wanted = new Set(
+    aliases.map(normalizeWarehouseName)
+  );
+
+  return (warehouses || []).find(
+    warehouse =>
+      wanted.has(
+        normalizeWarehouseName(
+          warehouse?.name
+        )
+      )
+  ) || null;
+};
+
 const emptyForm = () => ({
   stock_id: '',
   source_product_id: '',
@@ -63,6 +85,7 @@ export default function Labeling() {
   const [siapLabelStock, setSiapLabelStock] = useState([]);
   const [products, setProducts] = useState([]);
   const [brands, setBrands] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [labelMaterials, setLabelMaterials] = useState([]);
   const [labelStocks, setLabelStocks] = useState({});
   const [loading, setLoading] = useState(true);
@@ -97,6 +120,7 @@ export default function Labeling() {
         materials,
         materialBalances,
         labelProducts,
+        warehouseRows,
       ] = await Promise.all([
         base44.entities.LabelingOrder.list('-created_date', 100),
         getAllStockBalances('product'),
@@ -112,6 +136,7 @@ export default function Labeling() {
           is_active: true,
           product_type: 'label',
         }),
+        base44.entities.Warehouse.filter({ is_active: true }),
       ]);
 
       setData(orders || []);
@@ -126,6 +151,7 @@ export default function Labeling() {
 
       setProducts(productRows || []);
       setBrands(brandRows || []);
+      setWarehouses(warehouseRows || []);
 
       const materialLabels = (materials || []).filter(
         m =>
@@ -624,6 +650,38 @@ export default function Labeling() {
         ? 'belum_cukai'
         : 'siap_jual';
 
+    /*
+     * WAREHOUSE RULE
+     *
+     * Wajib cukai:
+     * Labeling output tetap di SIAP CUKAI.
+     *
+     * Sample / non-cukai:
+     * Labeling output langsung pindah ke SIAP JUAL.
+     */
+    const outputWarehouse =
+      exciseRequired
+        ? findWarehouseByAliases(
+            warehouses,
+            ['SIAP CUKAI', 'GUDANG SIAP CUKAI']
+          )
+        : findWarehouseByAliases(
+            warehouses,
+            ['SIAP JUAL', 'GUDANG SIAP JUAL']
+          );
+
+    if (!outputWarehouse) {
+      toast({
+        variant: 'destructive',
+        title: exciseRequired
+          ? 'Gudang SIAP CUKAI tidak ditemukan'
+          : 'Gudang SIAP JUAL tidak ditemukan',
+        description:
+          'Periksa Master Gudang sebelum memproses Labeling.',
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -1002,10 +1060,10 @@ export default function Labeling() {
           form.batch_number,
 
         warehouse_id:
-          sourceStock.warehouse_id || '',
+          outputWarehouse.id,
 
         warehouse_name:
-          sourceStock.warehouse_name || '',
+          outputWarehouse.name || '',
 
         inventory_status:
           outputInventoryStatus,
